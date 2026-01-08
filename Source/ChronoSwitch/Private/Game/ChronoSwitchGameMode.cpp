@@ -3,6 +3,7 @@
 
 #include "ChronoSwitch/Public/Game/ChronoSwitchGameMode.h"
 
+
 AChronoSwitchGameMode::AChronoSwitchGameMode()
 {
 	static ConstructorHelpers::FClassFinder<APawn> PlayerPawnBPClass(TEXT("/Game/Blueprints/BP_ChronoSwitchCharacter"));
@@ -22,6 +23,15 @@ void AChronoSwitchGameMode::StartPlay()
 	}
 	
 	UE_LOG(LogTemp, Log, TEXT("AChronoSwitchGameMode::StartPlay chiamato con successo"));
+
+	// if (const UNetDriver* NetDriver = GetWorld()->GetNetDriver())
+	// {
+	// 	UE_LOG(LogTemp, Warning, TEXT("NetDriver is in use: %s"), *NetDriver->GetClass()->GetName());
+	// }
+	// else
+	// {
+	// 	UE_LOG(LogTemp, Warning, TEXT("No NetDriver found!"));
+	// }
 }
 
 

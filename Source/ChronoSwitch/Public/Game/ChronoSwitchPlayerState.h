@@ -13,4 +13,8 @@ UCLASS()
 class CHRONOSWITCH_API AChronoSwitchPlayerState : public APlayerState
 {
 	GENERATED_BODY()
+	
+public:
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Replicated)
+	int32 TimelineID = 0;
 };

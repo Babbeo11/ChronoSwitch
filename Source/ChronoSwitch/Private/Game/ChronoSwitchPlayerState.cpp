@@ -2,3 +2,10 @@
 
 
 #include "ChronoSwitch/Public/Game/ChronoSwitchPlayerState.h"
+#include "Net/UnrealNetwork.h"
+
+void AChronoSwitchPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AChronoSwitchPlayerState, TimelineID);
+}
