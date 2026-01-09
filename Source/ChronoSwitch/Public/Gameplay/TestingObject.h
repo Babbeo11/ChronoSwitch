@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Game/ChronoSwitchPlayerState.h"
 #include "GameFramework/Actor.h"
 #include "TestingObject.generated.h"
 
@@ -16,27 +15,28 @@ public:
 	// Sets default values for this actor's properties
 	ATestingObject();
 	
-	void UpdateVisibilityFromPlayerState(AChronoSwitchPlayerState* PS, int32 TargetTimelineID);
+	// Called every frame
+	virtual void Tick(float DeltaTime) override;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, meta=(ExposeOnSpawn=true), Category = "Timeline")
-	int32 TimelineID = 0;
+	uint8 RequiredTimelineID;
 	
-	UPROPERTY(ReplicatedUsing=OnRep_VisibilityChanged)
-	bool bIsVisible = true;
+	void RefreshLocalVisibility();
 	
-	UFUNCTION()
-	void OnRep_VisibilityChanged();
-	
-	virtual bool IsNetRelevantFor(const AActor* RealViewer, const AActor* ViewTarget, const FVector& SrcLocation) const override;
+	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
+	void OnVisibilityChanged(bool bShouldBeVisible);
 
 protected:
-	// Called when the game starts or when spawned
+	
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
 	UStaticMeshComponent* StaticMesh;
-
-public:
-	// Called every frame
-	virtual void Tick(float DeltaTime) override;
+	
+	
+	void OnTimelineIDChanged(uint8 NewTimelineID);
+	
+private:
+	FDelegateHandle TimelineDelegateHandle;
 };

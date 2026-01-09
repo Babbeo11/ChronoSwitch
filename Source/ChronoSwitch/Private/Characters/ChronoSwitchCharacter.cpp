@@ -7,6 +7,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Game/ChronoSwitchPlayerState.h"
 
 
 // Sets default values
@@ -37,6 +38,8 @@ void AChronoSwitchCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	BindToPlayerState();
+	
 	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
@@ -108,4 +111,29 @@ void AChronoSwitchCharacter::JumpStart()
 void AChronoSwitchCharacter::JumpStop()
 {
 	StopJumping();
+}
+
+void AChronoSwitchCharacter::BindToPlayerState()
+{
+	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
+	{
+		PS->OnTimelineIDChanged.AddUObject(this, &AChronoSwitchCharacter::UpdateCollisionChannel);
+		
+		UpdateCollisionChannel(PS->GetTimelineID());
+	}
+	else
+	{
+		GetWorldTimerManager().SetTimer(PlayerStateBindTimer, this, &AChronoSwitchCharacter::BindToPlayerState, 0.1f, false);
+	}
+}
+
+void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
+{
+	if (!GetCapsuleComponent()) return;
+	
+	ECollisionChannel NewTimelineChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
+	
+	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
+	
+	// GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, FString::Printf(TEXT("Giocatore in Timeline: %d"), NewTimelineID));
 }

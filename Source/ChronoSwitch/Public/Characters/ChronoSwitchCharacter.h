@@ -59,6 +59,11 @@ protected:
 	UFUNCTION()
 	void JumpStop();
 	
+	// Binding to player state
+	void BindToPlayerState();
+	
+	// Change collision when timeline change
+	void UpdateCollisionChannel(uint8 NewTimelineID);
 	
 public:
 	// Called every frame
@@ -66,4 +71,8 @@ public:
 
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	
+private:
+	// Retry timer handle for player state
+	FTimerHandle PlayerStateBindTimer;
 };
