@@ -6,7 +6,7 @@ AChronoSwitchPlayerState::AChronoSwitchPlayerState()
 {
 	TimelineID = 0;
 	// Increased priority to ensure timeline synchronization is prioritized over standard gameplay data
-	NetPriority = 3.0f; 
+	NetPriority = 3.0f;
 }
 
 void AChronoSwitchPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

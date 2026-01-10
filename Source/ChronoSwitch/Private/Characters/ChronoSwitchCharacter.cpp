@@ -5,9 +5,12 @@
 #include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Interfaces/Interactable.h"
+#include "Animation/AnimInstanceProxy.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 
 // Sets default values
@@ -80,6 +83,11 @@ void AChronoSwitchCharacter::SetupPlayerInputComponent(UInputComponent* PlayerIn
 			EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &AChronoSwitchCharacter::JumpStart);
 			EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &AChronoSwitchCharacter::JumpStop);
 		}
+		
+		if (InteractAction)
+		{
+			EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AChronoSwitchCharacter::Interact);
+		}
 	}
 }
 
@@ -113,6 +121,21 @@ void AChronoSwitchCharacter::JumpStop()
 	StopJumping();
 }
 
+void AChronoSwitchCharacter::Interact()
+{
+	FHitResult OutHit = FHitResult();
+	if (BoxTraceFront(OutHit))
+	{
+		AActor* HitActor = OutHit.GetActor();
+		
+		if (HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		{
+			IInteractable* HitActorWithInterface = Cast<IInteractable>(HitActor);
+			HitActorWithInterface->Interact();
+		}
+	}
+}
+
 void AChronoSwitchCharacter::BindToPlayerState()
 {
 	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
@@ -136,4 +159,15 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
 	
 	// GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, FString::Printf(TEXT("Giocatore in Timeline: %d"), NewTimelineID));
+}
+
+bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, EDrawDebugTrace::Type Type)
+{
+	const FVector Start = FirstPersonCameraComponent->GetComponentLocation();
+	const FVector End = Start + FirstPersonCameraComponent->GetForwardVector() * DrawDistance;
+	const FVector HalfSize = FVector(5.f, 5.f, 5.f);
+	const TArray<AActor*> Empty; // Unsure on optimal solution for an empty array
+	
+	// To add: BoxTrace Channel checks for Timeline
+	return UKismetSystemLibrary::BoxTraceSingle(GetWorld(), Start, End, HalfSize, FirstPersonCameraComponent->GetComponentRotation(), UEngineTypes::ConvertToTraceType(ECollisionChannel::ECC_Visibility), false, Empty , Type, OutHit , true);
 }
