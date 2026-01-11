@@ -10,6 +10,8 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
+#include "Gameplay/ActorComponents/TimelineObserverComponent.h"
+#include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 
 
@@ -163,11 +165,25 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 
 bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, EDrawDebugTrace::Type Type)
 {
+	//Setting Parameters
 	const FVector Start = FirstPersonCameraComponent->GetComponentLocation();
 	const FVector End = Start + FirstPersonCameraComponent->GetForwardVector() * DrawDistance;
 	const FVector HalfSize = FVector(5.f, 5.f, 5.f);
-	const TArray<AActor*> Empty; // Unsure on optimal solution for an empty array
+	TArray<AActor*> ActorsToIgnore; // Might change where this array is located
+	ActorsToIgnore.Add(this);
 	
-	// To add: BoxTrace Channel checks for Timeline
-	return UKismetSystemLibrary::BoxTraceSingle(GetWorld(), Start, End, HalfSize, FirstPersonCameraComponent->GetComponentRotation(), UEngineTypes::ConvertToTraceType(ECollisionChannel::ECC_Visibility), false, Empty , Type, OutHit , true);
+	APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+	AChronoSwitchPlayerState* PS = (LocalPC) ? Cast<AChronoSwitchPlayerState>(LocalPC->PlayerState) : nullptr;
+	ECollisionChannel CollisionChannel;
+	
+	if (PS)
+		if (PS->GetTimelineID() == static_cast<uint8>(ETimelineType::Past))
+			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType::Past);
+		else
+			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType::Future);
+	else
+		return false;
+	
+	// Note: the second player currently blocks trace regardless of timeline
+	return UKismetSystemLibrary::BoxTraceSingle(GetWorld(), Start, End, HalfSize, FirstPersonCameraComponent->GetComponentRotation(), UEngineTypes::ConvertToTraceType(CollisionChannel), false, ActorsToIgnore , Type, OutHit , true);
 }

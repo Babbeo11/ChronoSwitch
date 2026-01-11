@@ -28,6 +28,11 @@ ECollisionChannel UTimelineObserverComponent::GetCollisionChannelForTimeline(ETi
 	return (Timeline == ETimelineType::Past) ? CHANNEL_PAST : CHANNEL_FUTURE;
 }
 
+ECollisionChannel UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType Timeline)
+{
+	return (Timeline == ETimelineType::Past) ? CHANNEL_TRACE_PAST : CHANNEL_TRACE_FUTURE;
+}
+
 void UTimelineObserverComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -130,12 +135,17 @@ void UTimelineObserverComponent::SetupActorCollision()
 
 	TArray<UPrimitiveComponent*> Primitives;
 	Owner->GetComponents<UPrimitiveComponent>(Primitives);
-
+	
 	const ECollisionChannel MyChannel = GetCollisionChannelForTimeline(TargetTimeline);
 	const ECollisionChannel OtherChannel = GetCollisionChannelForTimeline(
 		TargetTimeline == ETimelineType::Past ? ETimelineType::Future : ETimelineType::Past
 	);
-
+	
+	const ECollisionChannel MyTraceChannel = GetCollisionTraceChannelForTimeline(TargetTimeline);
+	const ECollisionChannel OtherTraceChannel = GetCollisionTraceChannelForTimeline(
+		TargetTimeline == ETimelineType::Past ? ETimelineType::Future : ETimelineType::Past
+	);
+	
 	for (UPrimitiveComponent* Primitive : Primitives)
 	{
 		if (!Primitive) continue;
@@ -149,6 +159,9 @@ void UTimelineObserverComponent::SetupActorCollision()
 		// Ensure we block objects in our own timeline but ignore those in the 'other' timeline
 		Primitive->SetCollisionResponseToChannel(MyChannel, ECR_Block);
 		Primitive->SetCollisionResponseToChannel(OtherChannel, ECR_Ignore);
+		
+		Primitive->SetCollisionResponseToChannel(MyTraceChannel, ECR_Block);
+		Primitive->SetCollisionResponseToChannel(OtherTraceChannel, ECR_Ignore);
 		
 		// Standard gameplay interaction
 		Primitive->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);

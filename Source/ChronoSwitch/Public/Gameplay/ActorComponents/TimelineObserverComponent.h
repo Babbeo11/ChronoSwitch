@@ -41,6 +41,7 @@ public:
 
 	/** Maps a timeline enum to its corresponding collision channel. */
 	static ECollisionChannel GetCollisionChannelForTimeline(ETimelineType Timeline);
+	static ECollisionChannel GetCollisionTraceChannelForTimeline(ETimelineType Timeline);
 
 protected:
 	virtual void BeginPlay() override;
@@ -58,6 +59,8 @@ private:
 	/** Project-specific collision channels defined in DefaultEngine.ini. */
 	static constexpr ECollisionChannel CHANNEL_PAST = ECC_GameTraceChannel1;
 	static constexpr ECollisionChannel CHANNEL_FUTURE = ECC_GameTraceChannel2;
+	static constexpr ECollisionChannel CHANNEL_TRACE_PAST = ECC_GameTraceChannel3;
+	static constexpr ECollisionChannel CHANNEL_TRACE_FUTURE = ECC_GameTraceChannel4;
 	static constexpr float BINDING_RETRY_DELAY = 0.2f;
 
 	/** Subscribes to the local PlayerState events. Retries if PlayerState is not yet available. */
