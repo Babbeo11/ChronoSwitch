@@ -1,12 +1,11 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
 #include "ChronoSwitchPlayerState.generated.h"
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTimelineIDChanged, uint8);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnVisorStateChanged, bool);
 
 /**
  * Custom PlayerState responsible for managing the "Timeline" switching logic.
@@ -20,9 +19,19 @@ class CHRONOSWITCH_API AChronoSwitchPlayerState : public APlayerState
 public:
 	AChronoSwitchPlayerState();
 
+	/** Broadcast whenever the Timeline ID is updated */
+	FOnTimelineIDChanged OnTimelineIDChanged;
+	
+	/** Broadcast whenever the Visor state is toggled */
+	FOnVisorStateChanged OnVisorStateChanged;
+
 	/** Returns the current Timeline ID */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	FORCEINLINE uint8 GetTimelineID() const { return TimelineID; }
+
+	/** Returns whether the visor is currently active */
+	UFUNCTION(BlueprintCallable, Category = "Timeline")
+	FORCEINLINE bool IsVisorActive() const { return bVisorActive; }
 
 	/** 
 	 * Initiates a timeline change request. 
@@ -37,25 +46,38 @@ public:
 	 */
 	UFUNCTION(BlueprintAuthorityOnly, Category = "Timeline")
 	void SetTimelineID(uint8 NewID);
-
-	/** Delegate broadcast whenever the Timeline ID is updated */
-	FOnTimelineIDChanged OnTimelineIDChanged;
 	
+	/** Sets the visor state and synchronizes it across the network */
+	UFUNCTION(BlueprintCallable, Category = "Timeline")
+	void SetVisorActive(bool bNewState);
+
 protected:
 	/** The current Timeline index, synchronized from Server to Clients */
 	UPROPERTY(ReplicatedUsing = OnRep_TimelineID)
 	uint8 TimelineID;
 	
-	/** RPC to handle the timeline change on the server */
-	UFUNCTION(Server, Reliable, WithValidation)
-	void Server_SetTimelineID(uint8 NewID);
+	/** Whether the special visor is active, allowing the player to see other timelines */
+	UPROPERTY(ReplicatedUsing = OnRep_VisorActive, BlueprintReadOnly, Category = "Timeline")
+	bool bVisorActive;
 	
-	/** Replication callback for TimelineID */
+	/** Replication Support */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	UFUNCTION()
 	void OnRep_TimelineID();
 	
-	/** Internal helper to update the local value and notify listeners */
-	void UpdateTimeline(uint8 NewID);
+	UFUNCTION()
+	void OnRep_VisorActive();
+
+	/** Server RPCs */
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_SetTimelineID(uint8 NewID);
 	
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	UFUNCTION(Server, Reliable, WithValidation)
+	void Server_SetVisorActive(bool bNewState);
+
+private:
+	/** Internal helpers to update local state and notify observers (centralizes logic) */
+	void NotifyTimelineChanged(uint8 NewID);
+	void NotifyVisorStateChanged(bool bNewState);
 };

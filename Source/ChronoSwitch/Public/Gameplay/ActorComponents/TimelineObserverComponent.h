@@ -6,6 +6,9 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimelineStateChanged, bool, bActiveInTimeline);
 
+/**
+ * Defines the available timelines in the game world.
+ */
 UENUM(BlueprintType)
 enum class ETimelineType : uint8
 {
@@ -14,8 +17,11 @@ enum class ETimelineType : uint8
 };
 
 /**
- * Component that observes timeline changes from the PlayerState and updates 
- * the owner's collision and broadcast state accordingly.
+ * UTimelineObserverComponent
+ * 
+ * This component listens to timeline and visor state changes from the local PlayerState.
+ * It automatically manages the owner's collision channels and visibility based on 
+ * whether the owner's assigned 'TargetTimeline' matches the world's current timeline.
  */
 UCLASS(meta=(BlueprintSpawnableComponent), HideCategories=(Timeline))
 class CHRONOSWITCH_API UTimelineObserverComponent : public UActorComponent
@@ -25,37 +31,47 @@ class CHRONOSWITCH_API UTimelineObserverComponent : public UActorComponent
 public:
 	UTimelineObserverComponent();
 	
+	/** Broadcasts when the active status of this component in the current timeline changes. */
 	UPROPERTY(BlueprintAssignable, Category = "Timeline")
 	FOnTimelineStateChanged OnTimelineStateChanged;
 	
-	/** Updates the component's target timeline and refreshes actor collision settings. */
+	/** Sets the timeline this actor belongs to and refreshes its world state. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	void SetTargetTimeline(ETimelineType NewTimeline);
+
+	/** Maps a timeline enum to its corresponding collision channel. */
+	static ECollisionChannel GetCollisionChannelForTimeline(ETimelineType Timeline);
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** The timeline assigned to this component/actor. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
 	ETimelineType TargetTimeline;
 	
 private:
-	/** Handle for the PlayerState delegate subscription. */
-	FDelegateHandle TimelineDelegateHandle;
+	/** Subscription handles for PlayerState delegates. */
+	FDelegateHandle OnTimelineIDChangedHandle;
+	FDelegateHandle OnVisorStateChangedHandle;
 
-	/** Constants for project-specific collision channels. */
+	/** Project-specific collision channels defined in DefaultEngine.ini. */
 	static constexpr ECollisionChannel CHANNEL_PAST = ECC_GameTraceChannel1;
 	static constexpr ECollisionChannel CHANNEL_FUTURE = ECC_GameTraceChannel2;
+	static constexpr float BINDING_RETRY_DELAY = 0.2f;
 
-	/** Attempts to find the local PlayerState and bind to timeline changes. */
+	/** Subscribes to the local PlayerState events. Retries if PlayerState is not yet available. */
 	void InitializeBinding();
 	
-	/** Callback for when the global timeline ID changes in the PlayerState. */
+	/** Event handler for global timeline shifts. */
 	void HandleTimelineChanged(uint8 NewTimelineID);
 	
-	/** Compares the current ID with the target and broadcasts the result. */
+	/** Event handler for visor toggle (allows seeing across timelines). */
+	void HandleVisorStateChanged(bool bNewState);
+	
+	/** Updates visibility and broadcasts state based on the current player context. */
 	void UpdateTimelineState(uint8 CurrentTimelineID);
 	
-	/** Configures owner's primitive components collision filtering. */
+	/** Configures the owner's collision filtering for the assigned timeline. */
 	void SetupActorCollision();
 };
