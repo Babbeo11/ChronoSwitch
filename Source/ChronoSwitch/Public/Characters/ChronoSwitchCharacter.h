@@ -84,5 +84,5 @@ private:
 	FTimerHandle PlayerStateBindTimer;
 	
 	// Generates Box Trace from Camera component
-	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 1000, EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
+	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
 };

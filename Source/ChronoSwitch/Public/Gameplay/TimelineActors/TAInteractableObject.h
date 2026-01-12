@@ -3,17 +3,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "TimelineBaseActor.h"
 #include "GameFramework/Actor.h"
 #include "Interfaces/Interactable.h"
-#include "InteractableObject.generated.h"
+#include "TAInteractableObject.generated.h"
 
-UCLASS()class CHRONOSWITCH_API AInteractableObject : public AActor, public IInteractable
+UCLASS()
+class CHRONOSWITCH_API ATAInteractableObject : public ATimelineBaseActor, public IInteractable
 {
 	GENERATED_BODY()
 
 public:
 	// Sets default values for this actor's properties
-	AInteractableObject();
+	ATAInteractableObject();
 
 protected:
 	// Called when the game starts or when spawned

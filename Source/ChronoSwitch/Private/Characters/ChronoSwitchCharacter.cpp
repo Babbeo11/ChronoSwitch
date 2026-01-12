@@ -163,12 +163,12 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 	// GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, FString::Printf(TEXT("Giocatore in Timeline: %d"), NewTimelineID));
 }
 
-bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, EDrawDebugTrace::Type Type)
+bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, const EDrawDebugTrace::Type Type)
 {
 	//Setting Parameters
 	const FVector Start = FirstPersonCameraComponent->GetComponentLocation();
 	const FVector End = Start + FirstPersonCameraComponent->GetForwardVector() * DrawDistance;
-	const FVector HalfSize = FVector(5.f, 5.f, 5.f);
+	const FVector HalfSize = FVector(10.f, 10.f, 10.f);
 	TArray<AActor*> ActorsToIgnore; // Might change where this array is located
 	ActorsToIgnore.Add(this);
 	
