@@ -2,6 +2,7 @@
 #include "Game/ChronoSwitchPlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "Components/BoxComponent.h"
 
 UTimelineObserverComponent::UTimelineObserverComponent()
 {
@@ -148,9 +149,11 @@ void UTimelineObserverComponent::SetupActorCollision()
 	
 	for (UPrimitiveComponent* Primitive : Primitives)
 	{
-		if (!Primitive) continue;
+		if (!Primitive || Primitive->IsA<UBoxComponent>()) continue;
 
+		
 		// Use 'Custom' profile to allow fine-grained control over timeline channels
+		
 		Primitive->SetCollisionProfileName(TEXT("Custom"));
 		Primitive->SetCollisionObjectType(MyChannel);
 		
