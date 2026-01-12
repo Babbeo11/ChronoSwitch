@@ -5,9 +5,14 @@
 #include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Interfaces/Interactable.h"
+#include "Animation/AnimInstanceProxy.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
+#include "Gameplay/ActorComponents/TimelineObserverComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 
 // Sets default values
@@ -80,6 +85,11 @@ void AChronoSwitchCharacter::SetupPlayerInputComponent(UInputComponent* PlayerIn
 			EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &AChronoSwitchCharacter::JumpStart);
 			EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &AChronoSwitchCharacter::JumpStop);
 		}
+		
+		if (InteractAction)
+		{
+			EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AChronoSwitchCharacter::Interact);
+		}
 	}
 }
 
@@ -113,6 +123,21 @@ void AChronoSwitchCharacter::JumpStop()
 	StopJumping();
 }
 
+void AChronoSwitchCharacter::Interact()
+{
+	FHitResult OutHit = FHitResult();
+	if (BoxTraceFront(OutHit))
+	{
+		AActor* HitActor = OutHit.GetActor();
+		
+		if (HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		{
+			IInteractable* HitActorWithInterface = Cast<IInteractable>(HitActor);
+			HitActorWithInterface->Interact();
+		}
+	}
+}
+
 void AChronoSwitchCharacter::BindToPlayerState()
 {
 	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
@@ -136,4 +161,29 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
 	
 	// GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, FString::Printf(TEXT("Giocatore in Timeline: %d"), NewTimelineID));
+}
+
+bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, const EDrawDebugTrace::Type Type)
+{
+	//Setting Parameters
+	const FVector Start = FirstPersonCameraComponent->GetComponentLocation();
+	const FVector End = Start + FirstPersonCameraComponent->GetForwardVector() * DrawDistance;
+	const FVector HalfSize = FVector(10.f, 10.f, 10.f);
+	TArray<AActor*> ActorsToIgnore; // Might change where this array is located
+	ActorsToIgnore.Add(this);
+	
+	APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+	AChronoSwitchPlayerState* PS = (LocalPC) ? Cast<AChronoSwitchPlayerState>(LocalPC->PlayerState) : nullptr;
+	ECollisionChannel CollisionChannel;
+	
+	if (PS)
+		if (PS->GetTimelineID() == static_cast<uint8>(ETimelineType::Past))
+			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType::Past);
+		else
+			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType::Future);
+	else
+		return false;
+	
+	// Note: the second player currently blocks trace regardless of timeline
+	return UKismetSystemLibrary::BoxTraceSingle(GetWorld(), Start, End, HalfSize, FirstPersonCameraComponent->GetComponentRotation(), UEngineTypes::ConvertToTraceType(CollisionChannel), false, ActorsToIgnore , Type, OutHit , true);
 }

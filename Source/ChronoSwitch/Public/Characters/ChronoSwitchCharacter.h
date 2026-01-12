@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "ChronoSwitchCharacter.generated.h"
 
 class UCameraComponent;
@@ -46,7 +47,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
 	TObjectPtr<UInputAction> JumpAction;
 	
-	// Input calback functions
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
+	TObjectPtr<UInputAction> InteractAction;
+	
+	// Input callback functions
 	UFUNCTION()
 	void Move(const FInputActionValue& Value);
 	
@@ -58,6 +62,9 @@ protected:
 	
 	UFUNCTION()
 	void JumpStop();
+	
+	UFUNCTION()
+	void Interact();
 	
 	// Binding to player state
 	void BindToPlayerState();
@@ -75,4 +82,7 @@ public:
 private:
 	// Retry timer handle for player state
 	FTimerHandle PlayerStateBindTimer;
+	
+	// Generates Box Trace from Camera component
+	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
 };
