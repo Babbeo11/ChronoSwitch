@@ -55,6 +55,7 @@ private:
 	/** Subscription handles for PlayerState delegates. */
 	FDelegateHandle OnTimelineIDChangedHandle;
 	FDelegateHandle OnVisorStateChangedHandle;
+	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedPlayerState;
 
 	/** Project-specific collision channels defined in DefaultEngine.ini. */
 	static constexpr ECollisionChannel CHANNEL_PAST = ECC_GameTraceChannel1;

@@ -43,14 +43,11 @@ void UTimelineObserverComponent::BeginPlay()
 
 void UTimelineObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// Clean up delegate subscriptions to prevent memory leaks or dangling pointers
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	// Clean up delegate subscriptions using the cached PlayerState
+	if (CachedPlayerState.IsValid())
 	{
-		if (AChronoSwitchPlayerState* PS = Cast<AChronoSwitchPlayerState>(PC->PlayerState))
-		{
-			PS->OnTimelineIDChanged.Remove(OnTimelineIDChangedHandle);
-			PS->OnVisorStateChanged.Remove(OnVisorStateChangedHandle);
-		}
+		CachedPlayerState->OnTimelineIDChanged.Remove(OnTimelineIDChangedHandle);
+		CachedPlayerState->OnVisorStateChanged.Remove(OnVisorStateChangedHandle);
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -70,10 +67,12 @@ void UTimelineObserverComponent::InitializeBinding()
 	{
 		if (AChronoSwitchPlayerState* PS = Cast<AChronoSwitchPlayerState>(LocalPC->PlayerState))
 		{
+			CachedPlayerState = PS;
+
 			OnTimelineIDChangedHandle = PS->OnTimelineIDChanged.AddUObject(this, &UTimelineObserverComponent::HandleTimelineChanged);
 			OnVisorStateChangedHandle = PS->OnVisorStateChanged.AddUObject(this, &UTimelineObserverComponent::HandleVisorStateChanged);
 			
-			UpdateTimelineState(PS->GetTimelineID());
+			UpdateTimelineState(CachedPlayerState->GetTimelineID());
 			return;
 		}
 	}
@@ -93,22 +92,19 @@ void UTimelineObserverComponent::HandleTimelineChanged(uint8 NewTimelineID)
 
 void UTimelineObserverComponent::HandleVisorStateChanged(bool bNewState)
 {
-	if (APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	// The new state is implicitly handled by UpdateTimelineState which reads it from the PlayerState.
+	if (CachedPlayerState.IsValid())
 	{
-		if (AChronoSwitchPlayerState* PS = Cast<AChronoSwitchPlayerState>(LocalPC->PlayerState))
-		{
-			UpdateTimelineState(PS->GetTimelineID());
-		}
+		UpdateTimelineState(CachedPlayerState->GetTimelineID());
 	}
 }
 
 void UTimelineObserverComponent::UpdateTimelineState(uint8 CurrentTimelineID)
 {
-	APlayerController* LocalPC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
-	AChronoSwitchPlayerState* PS = (LocalPC) ? Cast<AChronoSwitchPlayerState>(LocalPC->PlayerState) : nullptr;
+	if (!CachedPlayerState.IsValid()) return;
 
 	const bool bActiveInTimeline = (CurrentTimelineID == static_cast<uint8>(TargetTimeline));
-	const bool bVisorActive = PS ? PS->IsVisorActive() : false;
+	const bool bVisorActive = CachedPlayerState->IsVisorActive();
 
 	// Visibility is granted if we are in the correct timeline OR if the visor is active
 	const bool bShouldBeVisible = bActiveInTimeline || bVisorActive;
@@ -137,19 +133,17 @@ void UTimelineObserverComponent::SetupActorCollision()
 	TArray<UPrimitiveComponent*> Primitives;
 	Owner->GetComponents<UPrimitiveComponent>(Primitives);
 	
+	const ETimelineType OtherTimeline = (TargetTimeline == ETimelineType::Past) ? ETimelineType::Future : ETimelineType::Past;
+
 	const ECollisionChannel MyChannel = GetCollisionChannelForTimeline(TargetTimeline);
-	const ECollisionChannel OtherChannel = GetCollisionChannelForTimeline(
-		TargetTimeline == ETimelineType::Past ? ETimelineType::Future : ETimelineType::Past
-	);
+	const ECollisionChannel OtherChannel = GetCollisionChannelForTimeline(OtherTimeline);
 	
 	const ECollisionChannel MyTraceChannel = GetCollisionTraceChannelForTimeline(TargetTimeline);
-	const ECollisionChannel OtherTraceChannel = GetCollisionTraceChannelForTimeline(
-		TargetTimeline == ETimelineType::Past ? ETimelineType::Future : ETimelineType::Past
-	);
+	const ECollisionChannel OtherTraceChannel = GetCollisionTraceChannelForTimeline(OtherTimeline);
 	
 	for (UPrimitiveComponent* Primitive : Primitives)
 	{
-		if (!Primitive || Primitive->IsA<UBoxComponent>()) continue;
+		if (!Primitive || Primitive->ComponentHasTag(FName("NoTimelineCollision"))) continue;
 
 		
 		// Use 'Custom' profile to allow fine-grained control over timeline channels
