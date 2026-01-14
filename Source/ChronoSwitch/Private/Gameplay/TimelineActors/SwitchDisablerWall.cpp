@@ -15,18 +15,16 @@ ASwitchDisablerWall::ASwitchDisablerWall()
 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 	
-	SceneComponent = CreateDefaultSubobject<USceneComponent>("SceneComponent");
 	FirstPillar = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPillar"));
 	SecondPillar = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("SecondPillar"));
 	
 	EnterBox = CreateDefaultSubobject<UBoxComponent>(TEXT("EnterBox"));
 	ExitBox = CreateDefaultSubobject<UBoxComponent>(TEXT("ExitBox"));
 	
-	RootComponent = SceneComponent;
-	FirstPillar->SetupAttachment(SceneComponent);
-	SecondPillar->SetupAttachment(SceneComponent);
-	EnterBox->SetupAttachment(SceneComponent);
-	ExitBox->SetupAttachment(SceneComponent);
+	FirstPillar->SetupAttachment(SceneRoot);
+	SecondPillar->SetupAttachment(SceneRoot);
+	EnterBox->SetupAttachment(SceneRoot);
+	ExitBox->SetupAttachment(SceneRoot);
 	
 	EnterBox->OnComponentBeginOverlap.AddDynamic(this, &ASwitchDisablerWall::OnEnterWall);
 	ExitBox->OnComponentBeginOverlap.AddDynamic(this, &ASwitchDisablerWall::OnExitWall);

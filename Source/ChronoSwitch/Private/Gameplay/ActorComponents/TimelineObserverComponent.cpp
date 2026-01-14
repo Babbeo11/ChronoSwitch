@@ -2,7 +2,6 @@
 #include "Game/ChronoSwitchPlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
-#include "Components/BoxComponent.h"
 
 UTimelineObserverComponent::UTimelineObserverComponent()
 {
