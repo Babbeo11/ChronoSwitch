@@ -23,7 +23,3 @@ void ATAInteractableObject::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 }
 
-void ATAInteractableObject::Interact()
-{
-	GEngine->AddOnScreenDebugMessage(-1,5.f,FColor::Green,TEXT("InteractableObject::Interact() implementation"));
-}

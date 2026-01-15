@@ -9,7 +9,7 @@
 #include "TAInteractableObject.generated.h"
 
 UCLASS()
-class CHRONOSWITCH_API ATAInteractableObject : public ATimelineBaseActor, public IInteractable
+class CHRONOSWITCH_API ATAInteractableObject : public ATimelineBaseActor
 {
 	GENERATED_BODY()
 
@@ -25,5 +25,4 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 	
-	virtual void Interact() override;
 };

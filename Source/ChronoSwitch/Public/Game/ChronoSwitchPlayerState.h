@@ -7,10 +7,9 @@
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTimelineIDChanged, uint8);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnVisorStateChanged, bool);
 
-/**
- * Custom PlayerState responsible for managing the "Timeline" switching logic.
- * Tracks which reality the player is currently in and synchronizes it across the network.
- */
+/** Manages player-specific state that needs to be synchronized across the network,
+ *  such as the current timeline and visor status.
+*/
 UCLASS()
 class CHRONOSWITCH_API AChronoSwitchPlayerState : public APlayerState
 {
@@ -19,65 +18,69 @@ class CHRONOSWITCH_API AChronoSwitchPlayerState : public APlayerState
 public:
 	AChronoSwitchPlayerState();
 
-	/** Broadcast whenever the Timeline ID is updated */
+	/** Broadcasts locally whenever the Timeline ID is updated. */
 	FOnTimelineIDChanged OnTimelineIDChanged;
 	
-	/** Broadcast whenever the Visor state is toggled */
+	/** Broadcasts locally whenever the Visor state is toggled. */
 	FOnVisorStateChanged OnVisorStateChanged;
 
-	/** Returns the current Timeline ID */
+	/** Returns the current Timeline ID. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	FORCEINLINE uint8 GetTimelineID() const { return TimelineID; }
 
-	/** Returns whether the visor is currently active */
+	/** Returns true if the timeline-viewing visor is currently active. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	FORCEINLINE bool IsVisorActive() const { return bVisorActive; }
 
-	/** 
-	 * Initiates a timeline change request. 
-	 * Includes client-side prediction for immediate feedback on the calling client.
-	 */
+	/** Initiates a timeline change request. Includes client-side prediction for immediate feedback. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	void RequestTimelineChange(uint8 NewID);
 
-	/** 
-	 * Forcefully sets the timeline ID. 
-	 * Can only be called by the Server (Authority).
-	 */
+	/** Initiates a visor state change request. Includes client-side prediction for immediate feedback. */
+	UFUNCTION(BlueprintCallable, Category = "Timeline")
+	void RequestVisorStateChange(bool bNewState);
+
+	/** Forcefully sets the timeline ID. Can only be called on the server. */
 	UFUNCTION(BlueprintAuthorityOnly, Category = "Timeline")
 	void SetTimelineID(uint8 NewID);
 	
-	/** Sets the visor state and synchronizes it across the network */
-	UFUNCTION(BlueprintCallable, Category = "Timeline")
+	/** Forcefully sets the visor state. Can only be called on the server. */
+	UFUNCTION(BlueprintAuthorityOnly, Category = "Timeline")
 	void SetVisorActive(bool bNewState);
 
 protected:
-	/** The current Timeline index, synchronized from Server to Clients */
+	/** The current timeline index (0 for Past, 1 for Future). Replicated to all clients. */
 	UPROPERTY(ReplicatedUsing = OnRep_TimelineID)
 	uint8 TimelineID;
 	
-	/** Whether the special visor is active, allowing the player to see other timelines */
+	/** True if the special visor is active, allowing the player to see elements from the other timeline. */
 	UPROPERTY(ReplicatedUsing = OnRep_VisorActive, BlueprintReadOnly, Category = "Timeline")
 	bool bVisorActive;
 	
-	/** Replication Support */
+	/** Standard Unreal function for defining replicated properties. */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	/** RepNotify function called on clients when TimelineID is replicated. */
 	UFUNCTION()
 	void OnRep_TimelineID();
 	
+	/** RepNotify function called on clients when bVisorActive is replicated. */
 	UFUNCTION()
 	void OnRep_VisorActive();
 
-	/** Server RPCs */
+	// --- Server RPCs ---
+
+	/** Server-side implementation for a timeline change request. */
 	UFUNCTION(Server, Reliable, WithValidation)
 	void Server_SetTimelineID(uint8 NewID);
 	
+	/** Server-side implementation for a visor state change request. */
 	UFUNCTION(Server, Reliable, WithValidation)
 	void Server_SetVisorActive(bool bNewState);
 
 private:
-	/** Internal helpers to update local state and notify observers (centralizes logic) */
+	/** Internal helper to update the local state and broadcast the change. */
 	void NotifyTimelineChanged(uint8 NewID);
+	/** Internal helper to update the local state and broadcast the change. */
 	void NotifyVisorStateChanged(bool bNewState);
 };
