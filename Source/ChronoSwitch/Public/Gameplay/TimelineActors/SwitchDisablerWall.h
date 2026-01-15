@@ -18,13 +18,13 @@ public:
 	// Sets default values for this actor's properties
 	ASwitchDisablerWall();
 	
-	UFUNCTION()
-	void OnEnterWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-	
-	UFUNCTION()
-	void OnExitWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
-		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+	// UFUNCTION()
+	// void OnEnterWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+	// 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+	//
+	// UFUNCTION()
+	// void OnExitWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, 
+	// 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 	
 protected:
 	// Called when the game starts or when spawned
@@ -42,8 +42,8 @@ protected:
 	UPROPERTY(BlueprintReadWrite, EditDefaultsOnly)
 	UBoxComponent* ExitBox = nullptr;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", meta = (DisplayPriority = "0"))
-	ETimelineType TimelineToSwitch;
+	// UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", meta = (DisplayPriority = "0"))
+	// ETimelineType TimelineToSwitch;
 
 public:
 	// Called every frame

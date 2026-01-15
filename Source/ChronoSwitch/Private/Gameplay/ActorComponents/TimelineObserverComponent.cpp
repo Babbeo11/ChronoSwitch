@@ -2,42 +2,43 @@
 #include "Game/ChronoSwitchPlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "Interfaces/TimeInterface.h"
 
 UTimelineObserverComponent::UTimelineObserverComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
-	TargetTimeline = ETimelineType::Past;
+	TargetTimeline = 0;
+	TempTargetTimeline = 0;
 }
 
-void UTimelineObserverComponent::SetTargetTimeline(ETimelineType NewTimeline)
+void UTimelineObserverComponent::SetTargetTimeline(uint8 NewTimeline)
 {
 	if (TargetTimeline == NewTimeline) return;
-
-	TargetTimeline = NewTimeline;
-    
+	
+	TempTargetTimeline = NewTimeline;
+	
 	if (GetWorld() && GetWorld()->IsGameWorld())
 	{
-		SetupActorCollision();
-		// Refresh state to match the new target timeline
 		InitializeBinding();
+		SetupActorCollision();
 	}
 }
 
-ECollisionChannel UTimelineObserverComponent::GetCollisionChannelForTimeline(ETimelineType Timeline)
+ECollisionChannel UTimelineObserverComponent::GetCollisionChannelForTimeline(uint8 Timeline)
 {
-	return (Timeline == ETimelineType::Past) ? CHANNEL_PAST : CHANNEL_FUTURE;
+	return (Timeline == 0) ? CHANNEL_PAST : CHANNEL_FUTURE;
 }
 
-ECollisionChannel UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType Timeline)
+ECollisionChannel UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(uint8 Timeline)
 {
-	return (Timeline == ETimelineType::Past) ? CHANNEL_TRACE_PAST : CHANNEL_TRACE_FUTURE;
+	return (Timeline == 0) ? CHANNEL_TRACE_PAST : CHANNEL_TRACE_FUTURE;
 }
 
 void UTimelineObserverComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	SetupActorCollision();
 	InitializeBinding();
+	SetupActorCollision();
 }
 
 void UTimelineObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -102,7 +103,17 @@ void UTimelineObserverComponent::UpdateTimelineState(uint8 CurrentTimelineID)
 {
 	if (!CachedPlayerState.IsValid()) return;
 
-	const bool bActiveInTimeline = (CurrentTimelineID == static_cast<uint8>(TargetTimeline));
+	AActor* Owner = GetOwner();
+	if (ITimeInterface* InterfaceInstance = Cast<ITimeInterface>(Owner))
+	{
+		TempTargetTimeline = InterfaceInstance->GetCurrentTimelineID();
+	}
+	
+	TargetTimeline = (TempTargetTimeline == 0 || TempTargetTimeline == 1) ? TempTargetTimeline : CachedPlayerState->GetTimelineID();
+	
+	UE_LOG(LogTemp, Warning, TEXT("TargetTimeline: %i"), TargetTimeline);
+	
+	const bool bActiveInTimeline = (CurrentTimelineID == TargetTimeline);
 	const bool bVisorActive = CachedPlayerState->IsVisorActive();
 
 	// Visibility is granted if we are in the correct timeline OR if the visor is active
@@ -129,10 +140,12 @@ void UTimelineObserverComponent::SetupActorCollision()
 	AActor* Owner = GetOwner();
 	if (!Owner) return;
 
+	UE_LOG(LogTemp, Warning, TEXT("TargetTimeline: %i"), TargetTimeline);
+	
 	TArray<UPrimitiveComponent*> Primitives;
 	Owner->GetComponents<UPrimitiveComponent>(Primitives);
 	
-	const ETimelineType OtherTimeline = (TargetTimeline == ETimelineType::Past) ? ETimelineType::Future : ETimelineType::Past;
+	const uint8 OtherTimeline = (TargetTimeline == 0) ? 1 : 0;
 
 	const ECollisionChannel MyChannel = GetCollisionChannelForTimeline(TargetTimeline);
 	const ECollisionChannel OtherChannel = GetCollisionChannelForTimeline(OtherTimeline);

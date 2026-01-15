@@ -6,7 +6,6 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Interfaces/Interactable.h"
-#include "Animation/AnimInstanceProxy.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
@@ -177,10 +176,10 @@ bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawD
 	ECollisionChannel CollisionChannel;
 	
 	if (PS)
-		if (PS->GetTimelineID() == static_cast<uint8>(ETimelineType::Past))
-			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType::Past);
+		if (PS->GetTimelineID() == 0)
+			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(0);
 		else
-			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(ETimelineType::Future);
+			CollisionChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(1);
 	else
 		return false;
 	

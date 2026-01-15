@@ -24,7 +24,7 @@ ATimelineBaseActor::ATimelineBaseActor()
 	TimelineObserver = CreateDefaultSubobject<UTimelineObserverComponent>(TEXT("TimelineObserver"));
 	
 	// Default state.
-	TargetTimeline = ETimelineType::Past;
+	ActorTimeline = EActorTimeline::PastOnly;
 }
 
 void ATimelineBaseActor::OnConstruction(const FTransform& Transform)
@@ -34,18 +34,7 @@ void ATimelineBaseActor::OnConstruction(const FTransform& Transform)
 	// Ensure the component reflects the actor's timeline state when placed or moved in the editor.
 	if (TimelineObserver)
 	{
-		TimelineObserver->SetTargetTimeline(TargetTimeline);
-	}
-}
-
-void ATimelineBaseActor::SetTargetTimeline(ETimelineType NewTimeline)
-{
-	TargetTimeline = NewTimeline;
-
-	// Propagate the change to the component to update collisions and visual states.
-	if (TimelineObserver)
-	{
-		TimelineObserver->SetTargetTimeline(TargetTimeline);
+		TimelineObserver->SetTargetTimeline(GetCurrentTimelineID());
 	}
 }
 
@@ -53,28 +42,26 @@ void ATimelineBaseActor::SetActorTimeline(EActorTimeline NewTimeline)
 {
 	ActorTimeline = NewTimeline;
 
-	// Propagate the change to the component to update collisions and visual states.
+	if (TimelineObserver)
+	{
+		TimelineObserver->SetTargetTimeline(GetCurrentTimelineID());
+	}
 	
-	switch (NewTimeline)
+}
+
+uint8 ATimelineBaseActor::GetCurrentTimelineID()
+{
+	switch (ActorTimeline)
 	{
 	case EActorTimeline::PastOnly:
-		
-		break;
-		
+		return 0;
 	case EActorTimeline::FutureOnly:
-		
-		break;
-		
+		return 1;
 	case EActorTimeline::Both_Static:
-		
-		break;
-		
+		return 2;
 	case EActorTimeline::Both_Causal:
-		
-		break;
-		
-	default:
-		
-		break;
+		return 2;
+	default: 
+		return 2;
 	}
 }

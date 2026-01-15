@@ -26,13 +26,13 @@ ASwitchDisablerWall::ASwitchDisablerWall()
 	EnterBox->SetupAttachment(SceneRoot);
 	ExitBox->SetupAttachment(SceneRoot);
 	
-	EnterBox->OnComponentBeginOverlap.AddDynamic(this, &ASwitchDisablerWall::OnEnterWall);
-	ExitBox->OnComponentBeginOverlap.AddDynamic(this, &ASwitchDisablerWall::OnExitWall);
+	// EnterBox->OnComponentBeginOverlap.AddDynamic(this, &ASwitchDisablerWall::OnEnterWall);
+	// ExitBox->OnComponentBeginOverlap.AddDynamic(this, &ASwitchDisablerWall::OnExitWall);
 	
-	TimelineToSwitch = ETimelineType::Past;
+	//TimelineToSwitch = ETimelineType::Past;
 }
 
-void ASwitchDisablerWall::OnEnterWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+/*void ASwitchDisablerWall::OnEnterWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	AChronoSwitchCharacter* Character = Cast<AChronoSwitchCharacter>(OtherActor);
@@ -47,13 +47,13 @@ void ASwitchDisablerWall::OnEnterWall(UPrimitiveComponent* OverlappedComponent, 
 	    	UE_LOG(LogTemp, Warning, TEXT("Timeline switched"));
 	    }
 	 }
-}
+}*/
 
-void ASwitchDisablerWall::OnExitWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-	UE_LOG(LogTemp, Warning, TEXT("Exit Wall"));
-}
+// void ASwitchDisablerWall::OnExitWall(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+// 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+// {
+// 	UE_LOG(LogTemp, Warning, TEXT("Exit Wall"));
+// }
 
 // Called when the game starts or when spawned
 void ASwitchDisablerWall::BeginPlay()

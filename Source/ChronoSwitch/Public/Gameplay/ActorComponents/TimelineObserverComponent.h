@@ -9,12 +9,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTimelineStateChanged, bool, bActi
 /**
  * Defines the available timelines in the game world.
  */
-UENUM(BlueprintType)
-enum class ETimelineType : uint8
-{
-	Past    UMETA(DisplayName = "Past (Timeline 0)"),
-	Future  UMETA(DisplayName = "Future (Timeline 1)")
-};
+
 
 /**
  * UTimelineObserverComponent
@@ -37,11 +32,11 @@ public:
 	
 	/** Sets the timeline this actor belongs to and refreshes its world state. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
-	void SetTargetTimeline(ETimelineType NewTimeline);
+	void SetTargetTimeline(uint8 NewTimeline);
 
 	/** Maps a timeline enum to its corresponding collision channel. */
-	static ECollisionChannel GetCollisionChannelForTimeline(ETimelineType Timeline);
-	static ECollisionChannel GetCollisionTraceChannelForTimeline(ETimelineType Timeline);
+	static ECollisionChannel GetCollisionChannelForTimeline(uint8 Timeline);
+	static ECollisionChannel GetCollisionTraceChannelForTimeline(uint8 Timeline);
 
 protected:
 	virtual void BeginPlay() override;
@@ -49,7 +44,9 @@ protected:
 
 	/** The timeline assigned to this component/actor. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
-	ETimelineType TargetTimeline;
+	uint8 TargetTimeline;
+	
+	uint8 TempTargetTimeline;
 	
 private:
 	/** Subscription handles for PlayerState delegates. */

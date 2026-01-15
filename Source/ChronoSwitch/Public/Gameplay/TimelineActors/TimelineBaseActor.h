@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Gameplay/ActorComponents/TimelineObserverComponent.h" 
+#include "Interfaces/TimeInterface.h"
 #include "TimelineBaseActor.generated.h"
 
 UENUM(BlueprintType)
@@ -18,19 +19,17 @@ enum class EActorTimeline : uint8
  * Base actor class that synchronizes its state with a TimelineObserverComponent.
  */
 UCLASS(PrioritizeCategories = "00 | Timeline")
-class CHRONOSWITCH_API ATimelineBaseActor : public AActor
+class CHRONOSWITCH_API ATimelineBaseActor : public AActor, public ITimeInterface
 {
 	GENERATED_BODY()
 
 public:
 	ATimelineBaseActor();
-
-	/** Updates the target timeline and synchronizes it with the observer component. */
-	UFUNCTION(BlueprintCallable, Category = "Timeline")
-	void SetTargetTimeline(ETimelineType NewTimeline);
 	
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	void SetActorTimeline(EActorTimeline NewTimeline);
+	
+	virtual uint8 GetCurrentTimelineID() override;
 
 protected:
 	
@@ -52,10 +51,6 @@ protected:
 	/** Component responsible for handling timeline-specific logic and collision. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
 	TObjectPtr<UTimelineObserverComponent> TimelineObserver;
-	
-	/** The specific timeline this actor belongs to. Synchronization is handled via Setter. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", Setter = SetTargetTimeline, meta = (DisplayPriority = "0"))
-	ETimelineType TargetTimeline;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", Setter = SetActorTimeline, meta = (DisplayPriority = "0"))
 	EActorTimeline ActorTimeline;
