@@ -1,4 +1,5 @@
 ﻿#include "Game/ChronoSwitchPlayerState.h"
+
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/PlayerController.h"
 
@@ -28,6 +29,15 @@ void AChronoSwitchPlayerState::RequestTimelineChange(uint8 NewID)
 	
 	// Send the request to the server for authoritative execution.
 	Server_SetTimelineID(NewID);
+}
+
+void AChronoSwitchPlayerState::NotifyTimelineChanged(uint8 NewID)
+{
+	if (TimelineID != NewID)
+	{
+		TimelineID = NewID;
+		OnTimelineIDChanged.Broadcast(TimelineID);
+	}
 }
 
 void AChronoSwitchPlayerState::RequestVisorStateChange(bool bNewState)
@@ -61,14 +71,7 @@ void AChronoSwitchPlayerState::SetVisorActive(bool bNewState)
 	}
 }
 
-void AChronoSwitchPlayerState::NotifyTimelineChanged(uint8 NewID)
-{
-	if (TimelineID != NewID)
-	{
-		TimelineID = NewID;
-		OnTimelineIDChanged.Broadcast(TimelineID);
-	}
-}
+
 
 void AChronoSwitchPlayerState::NotifyVisorStateChanged(bool bNewState)
 {
