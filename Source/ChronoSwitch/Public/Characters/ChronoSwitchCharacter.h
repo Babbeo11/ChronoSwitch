@@ -21,6 +21,7 @@ class CHRONOSWITCH_API AChronoSwitchCharacter : public ACharacter
 public:
 	/** Sets default values for this character's properties. */
 	AChronoSwitchCharacter();
+
 	
 
 protected:
@@ -76,6 +77,8 @@ protected:
 	
 	/** Updates the character's collision ObjectType when its timeline changes. */
 	void UpdateCollisionChannel(uint8 NewTimelineID);
+	
+	
 	
 	
 public:
