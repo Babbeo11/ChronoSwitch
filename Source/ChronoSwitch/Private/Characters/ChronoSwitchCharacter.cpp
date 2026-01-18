@@ -32,6 +32,12 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 	FirstPersonMeshComponent->bCastDynamicShadow = false;
 	FirstPersonMeshComponent->CastShadow = false;
 	
+	// Create the component that listens for the local player's timeline state changes.
+	ObjectPhysicsHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("ObjectPhysicsHandle"));
+	
+	// Sets default private variables
+	IsGrabbing = false;
+	
 	// The third-person body mesh should not be visible to the owning player.
 	GetMesh()->SetOwnerNoSee(true);
 }
@@ -88,6 +94,15 @@ void AChronoSwitchCharacter::Tick(float DeltaTime)
 	{
 		UpdatePlayerCollision(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get());
 		UpdatePlayerVisibility(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get());
+	}
+	
+	// Manage movement of grabbed object
+	if (IsGrabbing)
+	{
+		FVector location = FirstPersonCameraComponent->GetComponentLocation() + FirstPersonCameraComponent->GetForwardVector() * 250;
+		ObjectPhysicsHandle->SetTargetLocation(location);
+		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, location.ToString());
+		
 	}
 }
 
@@ -157,15 +172,33 @@ void AChronoSwitchCharacter::JumpStop()
 /** Handles the interact action, performing a trace to find an interactable object. */
 void AChronoSwitchCharacter::Interact()
 {
-	FHitResult OutHit = FHitResult();
-	if (BoxTraceFront(OutHit))
+	if (!IsGrabbing)
 	{
-		AActor* HitActor = OutHit.GetActor();
-		// Cast the hit actor to the IInteractable interface and call Interact if successful.
-		if (IInteractable* HitActorWithInterface = Cast<IInteractable>(HitActor))
+		FHitResult OutHit = FHitResult();
+		if (BoxTraceFront(OutHit))
 		{
-			HitActorWithInterface->Interact();
+			AActor* HitActor = OutHit.GetActor();
+			// Cast the hit actor to the IInteractable interface and call Interact if successful.
+			if (IInteractable* HitActorWithInterface = Cast<IInteractable>(HitActor))
+			{
+				if (HitActorWithInterface->IsGrabbable())
+				{
+					UPrimitiveComponent* HitComponent = OutHit.GetComponent();
+					ObjectPhysicsHandle->GrabComponentAtLocationWithRotation(HitComponent, FName(), HitComponent->GetComponentLocation(), FRotator(0, 0, 0));
+					IsGrabbing = true;
+				}
+				else
+				{
+					HitActorWithInterface->Interact();
+				}
+			}
 		}
+	}
+	else
+	{
+		Cast<IInteractable>(ObjectPhysicsHandle->GetGrabbedComponent()->GetOwner())->Release();
+		ObjectPhysicsHandle->ReleaseComponent();
+		IsGrabbing = false;
 	}
 }
 

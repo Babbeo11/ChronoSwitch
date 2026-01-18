@@ -33,16 +33,24 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	void Interact();
 	virtual void Interact_Implementation();
+	
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	bool IsGrabbable();
+	virtual bool IsGrabbable_Implementation();
+	
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	void Release();
+	virtual void Release_Implementation();
 
 protected:
 	// --- Components ---
 
 	/** The mesh representing the object in the Past timeline. */
-	UPROPERTY(BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent* PastMesh;
 	
 	/** The mesh representing the object in the Future timeline. */
-	UPROPERTY(BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent* FutureMesh;
 	
 	/** Listens for changes in the local player's timeline state. */

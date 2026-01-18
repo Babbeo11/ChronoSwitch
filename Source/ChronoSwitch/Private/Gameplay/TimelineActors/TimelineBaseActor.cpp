@@ -27,6 +27,19 @@ void ATimelineBaseActor::Interact_Implementation()
 	// The base implementation is empty, intended to be overridden in Blueprints or child C++ classes.
 }
 
+bool ATimelineBaseActor::IsGrabbable_Implementation()
+{
+	// This function is called when the player interacts with this actor.
+	// The base implementation is empty, intended to be overridden in Blueprints or child C++ classes.
+	return false;
+}
+
+void ATimelineBaseActor::Release_Implementation()
+{
+	// This function is called when the player interacts with this actor.
+	// The base implementation is empty, intended to be overridden in Blueprints or child C++ classes.
+}
+
 void ATimelineBaseActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);

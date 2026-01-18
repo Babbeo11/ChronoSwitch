@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "ChronoSwitchCharacter.generated.h"
 
 class UTimelineComponent;
@@ -35,6 +36,9 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Mesh, meta = (AllowPrivateAccess = "true"))
 	USkeletalMeshComponent* FirstPersonMeshComponent;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = PhysicsHandle, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UPhysicsHandleComponent> ObjectPhysicsHandle;
 	
 	// --- Input ---
 
@@ -106,6 +110,9 @@ private:
 	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
+	
+	UPROPERTY(EditAnywhere)
+	bool IsGrabbing;
 	
 	/** Performs a trace from the camera to find interactable objects in the world. */
 	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
