@@ -2,6 +2,7 @@
 
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/PlayerController.h"
+#include "ChronoSwitch/Public/Characters/ChronoSwitchCharacter.h"
 
 AChronoSwitchPlayerState::AChronoSwitchPlayerState()
 {
@@ -24,10 +25,11 @@ void AChronoSwitchPlayerState::RequestTimelineChange(uint8 NewID)
 {
 	if (TimelineID == NewID) return;
 
-	// Always update locally for immediate feedback (Prediction).
+	// Client-Side Prediction:
+	// Update the state locally immediately so the player feels zero latency.
 	NotifyTimelineChanged(NewID);
 	
-	// Send the request to the server for authoritative execution.
+	// Send the request to the server to validate and replicate the change.
 	Server_SetTimelineID(NewID);
 }
 
@@ -44,10 +46,11 @@ void AChronoSwitchPlayerState::RequestVisorStateChange(bool bNewState)
 {
 	if (bVisorActive == bNewState) return;
 
-	// Always update locally for immediate feedback (Prediction).
+	// Client-Side Prediction:
+	// Update the state locally immediately so the player feels zero latency.
 	NotifyVisorStateChanged(bNewState);
 
-	// Send the request to the server for authoritative execution.
+	// Send the request to the server to validate and replicate the change.
 	Server_SetVisorActive(bNewState);
 }
 
@@ -58,6 +61,15 @@ void AChronoSwitchPlayerState::SetTimelineID(uint8 NewID)
 	if (HasAuthority())
 	{
 		NotifyTimelineChanged(NewID);
+
+		// Network Optimization: Unified Rubber Banding Fix.
+		// Whenever the server changes the timeline (whether via Global Timer, Personal Input, or Cross Switch),
+		// we explicitly tell the owning client to update immediately via a Client RPC.
+		// This flushes the movement prediction buffer, preventing the client from "snapping back" to the old timeline.
+		if (AChronoSwitchCharacter* ChronoChar = Cast<AChronoSwitchCharacter>(GetPawn()))
+		{
+			ChronoChar->Client_ForcedTimelineChange(NewID);
+		}
 	}
 }
 
@@ -82,24 +94,21 @@ void AChronoSwitchPlayerState::NotifyVisorStateChanged(bool bNewState)
 	}
 }
 
-void AChronoSwitchPlayerState::OnRep_TimelineID()
+void AChronoSwitchPlayerState::OnRep_TimelineID(uint8 OldTimelineID)
 {
-	// When a replicated value changes, this function is called on clients.
-	// We skip the broadcast on the client that initiated the change (the Autonomous Proxy)
-	// because they have already performed client-side prediction.
-	// We check if this PlayerState is owned by the local controller to determine this.
-	const APlayerController* PC = GetPlayerController();
-	if (!PC || !PC->IsLocalController())
+	// Handle updates from the server.
+	// If this client predicted the change (via RequestTimelineChange), TimelineID will already match,
+	// and we do nothing.
+	// If this is a remote update (e.g., Global Timer), we broadcast the change to update visuals/collision.
+	if (TimelineID != OldTimelineID)
 	{
 		OnTimelineIDChanged.Broadcast(TimelineID);
 	}
 }
 
-void AChronoSwitchPlayerState::OnRep_VisorActive()
+void AChronoSwitchPlayerState::OnRep_VisorActive(bool bOldVisorActive)
 {
-	// Apply the same logic as OnRep_TimelineID.
-	const APlayerController* PC = GetPlayerController();
-	if (!PC || !PC->IsLocalController())
+	if (bVisorActive != bOldVisorActive)
 	{
 		OnVisorStateChanged.Broadcast(bVisorActive);
 	}

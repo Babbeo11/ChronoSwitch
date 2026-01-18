@@ -2,18 +2,3 @@
 
 
 #include "Interfaces/Interactable.h"
-
-// Add default functionality here for any IInteraction functions that are not pure virtual.
-void IInteractable::Interact()
-{
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Default IInteraction::Interact() implementation"));
-}
-bool IInteractable::IsGrabbable()
-{
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Default IInteraction::IsGrabbable() implementation"));
-	return true;
-}
-void IInteractable::Release()
-{
-	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("Default IInteraction::Release() implementation"));
-}

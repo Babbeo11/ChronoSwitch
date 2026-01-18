@@ -2,7 +2,7 @@
 
 ATimelineBaseActor::ATimelineBaseActor()
 {
-	// This actor does not need to tick. Its state is updated via events.
+	// This actor does not need to tick. Its state is updated via event delegates.
 	PrimaryActorTick.bCanEverTick = false;
 	
 	// A simple scene component as the root provides a clean attachment point.
@@ -21,37 +21,33 @@ ATimelineBaseActor::ATimelineBaseActor()
 	ActorTimeline = EActorTimeline::PastOnly;
 }
 
-void ATimelineBaseActor::Interact_Implementation()
+void ATimelineBaseActor::Interact_Implementation(ACharacter* Interactor)
 {
-	// This function is called when the player interacts with this actor.
-	// The base implementation is empty, intended to be overridden in Blueprints or child C++ classes.
+	// Base implementation is empty. Override in Blueprints or child classes to add logic.
 }
 
 bool ATimelineBaseActor::IsGrabbable_Implementation()
 {
-	// This function is called when the player interacts with this actor.
-	// The base implementation is empty, intended to be overridden in Blueprints or child C++ classes.
+	// By default, timeline actors are not grabbable. Override if needed.
 	return false;
 }
 
 void ATimelineBaseActor::Release_Implementation()
 {
-	// This function is called when the player interacts with this actor.
-	// The base implementation is empty, intended to be overridden in Blueprints or child C++ classes.
+	// Base implementation is empty.
 }
 
 void ATimelineBaseActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// Update visuals in the editor whenever a property is changed.
+	// Update visuals in the editor whenever a property is changed to provide WYSIWYG feedback.
 	UpdateEditorVisuals();
 }
 
 void ATimelineBaseActor::UpdateEditorVisuals()
 {
-	// This function provides immediate visual feedback in the editor.
-	// It shows or hides the meshes based on the selected ActorTimeline state.
+	// Provides immediate WYSIWYG feedback in the Unreal Editor viewport.
 	const bool bShowPast = (ActorTimeline == EActorTimeline::PastOnly || ActorTimeline == EActorTimeline::Both_Static || ActorTimeline == EActorTimeline::Both_Causal);
 	const bool bShowFuture = (ActorTimeline == EActorTimeline::FutureOnly || ActorTimeline == EActorTimeline::Both_Static || ActorTimeline == EActorTimeline::Both_Causal);
 
@@ -69,11 +65,12 @@ void ATimelineBaseActor::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	// Set up the permanent collision profiles for the meshes. This is done once.
+	// Set up the permanent collision profiles for the meshes. 
+	// This is done once at startup to ensure deterministic physical behavior.
 	SetupCollisionProfiles();
 
-	// Subscribe to the observer component's delegate. When the local player's timeline
-	// state changes, HandlePlayerTimelineUpdate will be called.
+	// Subscribe to the observer component's delegate. 
+	// When the local player's timeline state changes, HandlePlayerTimelineUpdate will be called.
 	if (TimelineObserver)
 	{
 		TimelineObserver->OnPlayerTimelineStateUpdated.AddDynamic(this, &ATimelineBaseActor::HandlePlayerTimelineUpdate);
@@ -82,11 +79,13 @@ void ATimelineBaseActor::BeginPlay()
 
 void ATimelineBaseActor::SetupCollisionProfiles()
 {
-	// This function sets the permanent physical identity of each mesh. This approach is multiplayer-friendly,
-	// as the collision profiles are static and the interacting character's own collision channel
-	// determines the outcome, preventing network desynchronization.
+	// Network Optimization: Static Collision Profiles.
+	// Instead of changing collision channels at runtime (which can cause desyncs),
+	// we set permanent profiles. The Player's own collision channel determines what they hit.
+	// This ensures that a player in the Past walks on Past objects, while a player in the Future walks on Future objects,
+	// even if they are in the same server instance.
 
-	// A helper lambda to configure a mesh's collision, avoiding code duplication.
+	// Helper lambda to configure a mesh's collision.
 	auto ConfigureMeshCollision = [](UStaticMeshComponent* Mesh, uint8 MeshTimelineID)
 	{
 		if (!Mesh) return;
@@ -96,32 +95,33 @@ void ATimelineBaseActor::SetupCollisionProfiles()
 
 		Mesh->SetCollisionObjectType(MyObjectChannel);
 
-		// Use the "Ignore All, Enable Selectively" pattern for robust collision.
-		// This prevents default mesh settings from causing unexpected interactions.
+		// "Ignore All, Enable Selectively" pattern for robust collision control.
 		Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 
-		// 1. Enable physical collision with characters/objects in its OWN timeline.
+		// 1. Block characters/objects that exist in the SAME timeline.
 		Mesh->SetCollisionResponseToChannel(MyObjectChannel, ECR_Block);
 
-		// 2. Enable collision with standard world geometry (like the floor).
+		// 2. Block standard world geometry (Floor, Walls).
 		Mesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 		Mesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
 
-		// 3. Enable collision for interaction traces from its OWN timeline.
-		// This allows the player's interaction trace to detect this object.
+		// 3. Block interaction traces from the SAME timeline.
 		Mesh->SetCollisionResponseToChannel(MyTraceChannel, ECR_Block);
 	};
 	
+	// Apply configuration based on the actor's timeline mode.
 	switch (ActorTimeline)
 	{
 	case EActorTimeline::PastOnly:
-		ConfigureMeshCollision(PastMesh, 0);
+		ConfigureMeshCollision(PastMesh, 0); // 0 = Past
 		if (FutureMesh) FutureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		break;
+		
 	case EActorTimeline::FutureOnly:
 		if (PastMesh) PastMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		ConfigureMeshCollision(FutureMesh, 1);
+		ConfigureMeshCollision(FutureMesh, 1); // 1 = Future
 		break;
+		
 	case EActorTimeline::Both_Static:
 	case EActorTimeline::Both_Causal:
 		ConfigureMeshCollision(PastMesh, 0);
@@ -132,37 +132,37 @@ void ATimelineBaseActor::SetupCollisionProfiles()
 
 void ATimelineBaseActor::HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool bIsVisorActive)
 {
-	// Determine which timeline the local player is currently in.
+	// This function manages VISUALS only. Collision is handled by the static profiles and the player's channel.
+	
 	const bool bPlayerIsInPast = (PlayerTimelineID == 0);
 
-	// Determine the visibility for each mesh based on the actor's state and the player's state.
+	// Determine visibility based on the actor's mode and the player's state.
 	bool bPastVisible = false;
 	bool bFutureVisible = false;
 
 	switch (ActorTimeline)
 	{
 	case EActorTimeline::PastOnly:
-		// Visible if player is in past, or as a ghost if player is in future with visor.
+		// Visible if player is in Past, OR if player is in Future but using the Visor (Ghost view).
 		bPastVisible = bPlayerIsInPast || (!bPlayerIsInPast && bIsVisorActive);
 		bFutureVisible = false;
 		break;
 
 	case EActorTimeline::FutureOnly:
 		bPastVisible = false;
-		// Visible if player is in future, or as a ghost if player is in past with visor.
+		// Visible if player is in Future, OR if player is in Past but using the Visor (Ghost view).
 		bFutureVisible = !bPlayerIsInPast || (bPlayerIsInPast && bIsVisorActive);
 		break;
 
 	case EActorTimeline::Both_Static:
 	case EActorTimeline::Both_Causal:
-		// For 'Both' states, there is no ghost effect; just show the solid mesh
-		// corresponding to the player's current timeline.
+		// If the object exists in both timelines, show the version corresponding to the player's current timeline.
+		// No ghost effect is needed here as the object is always "there".
 		bPastVisible = bPlayerIsInPast;
 		bFutureVisible = !bPlayerIsInPast;
 		break;
 	}
 
-	// Apply the calculated visibility to each mesh.
 	if(PastMesh) PastMesh->SetHiddenInGame(!bPastVisible);
 	if(FutureMesh) FutureMesh->SetHiddenInGame(!bFutureVisible);
 }

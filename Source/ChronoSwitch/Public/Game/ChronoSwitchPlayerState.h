@@ -18,11 +18,15 @@ class CHRONOSWITCH_API AChronoSwitchPlayerState : public APlayerState
 public:
 	AChronoSwitchPlayerState();
 
+	// --- Delegates ---
+
 	/** Broadcasts locally whenever the Timeline ID is updated. */
 	FOnTimelineIDChanged OnTimelineIDChanged;
 	
 	/** Broadcasts locally whenever the Visor state is toggled. */
 	FOnVisorStateChanged OnVisorStateChanged;
+
+	// --- Getters ---
 
 	/** Returns the current Timeline ID. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
@@ -32,6 +36,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	FORCEINLINE bool IsVisorActive() const { return bVisorActive; }
 
+	// --- State Change Requests (Client Side Prediction) ---
+
 	/** Initiates a timeline change request. Includes client-side prediction for immediate feedback. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	void RequestTimelineChange(uint8 NewID);
@@ -39,6 +45,8 @@ public:
 	/** Initiates a visor state change request. Includes client-side prediction for immediate feedback. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	void RequestVisorStateChange(bool bNewState);
+
+	// --- Authority Setters (Server Side) ---
 
 	/** Forcefully sets the timeline ID. Can only be called on the server. */
 	UFUNCTION(BlueprintAuthorityOnly, Category = "Timeline")
@@ -49,6 +57,8 @@ public:
 	void SetVisorActive(bool bNewState);
 
 protected:
+	// --- Replicated Properties ---
+
 	/** The current timeline index (0 for Past, 1 for Future). Replicated to all clients. */
 	UPROPERTY(ReplicatedUsing = OnRep_TimelineID)
 	uint8 TimelineID;
@@ -62,13 +72,13 @@ protected:
 
 	/** RepNotify function called on clients when TimelineID is replicated. */
 	UFUNCTION()
-	void OnRep_TimelineID();
+	void OnRep_TimelineID(uint8 OldTimelineID);
 	
 	/** RepNotify function called on clients when bVisorActive is replicated. */
 	UFUNCTION()
-	void OnRep_VisorActive();
+	void OnRep_VisorActive(bool bOldVisorActive);
 
-	// --- Server RPCs ---
+	// --- Server RPCs (Internal) ---
 
 	/** Server-side implementation for a timeline change request. */
 	UFUNCTION(Server, Reliable, WithValidation)
@@ -79,8 +89,11 @@ protected:
 	void Server_SetVisorActive(bool bNewState);
 
 private:
+	// --- Internal Helpers ---
+
 	/** Internal helper to update the local state and broadcast the change. */
 	void NotifyTimelineChanged(uint8 NewID);
+	
 	/** Internal helper to update the local state and broadcast the change. */
 	void NotifyVisorStateChanged(bool bNewState);
 };

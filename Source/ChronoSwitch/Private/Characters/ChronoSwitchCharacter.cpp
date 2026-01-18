@@ -10,7 +10,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
 #include "EngineUtils.h"
+#include "Game/ChronoSwitchGameState.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 
 AChronoSwitchCharacter::AChronoSwitchCharacter()
@@ -49,6 +51,26 @@ void AChronoSwitchCharacter::BeginPlay()
 	// Attempt to bind to this character's PlayerState to react to timeline changes.
 	// This will retry if the PlayerState is not immediately available.
 	BindToPlayerState();	
+
+	// --- Network Optimization: Simulated Proxies ---
+	// Remote players (Simulated Proxies) should not calculate local physics against timeline objects.
+	// We disable specific collision channels and gravity to force them to strictly interpolate the Server's position.
+	if (GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+		{
+			Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
+		}
+
+		// Disable gravity for proxies. This prevents them from "falling" locally when the server 
+		// stops sending updates (e.g., when standing still), eliminating visual jitter.
+		if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+		{
+			CMC->GravityScale = 0.f;
+		}
+	}
+	
 	
 	// Add the input mapping context for the local player.
 	if (const APlayerController* PC = Cast<APlayerController>(GetController()))
@@ -132,6 +154,11 @@ void AChronoSwitchCharacter::SetupPlayerInputComponent(UInputComponent* PlayerIn
 		{
 			EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AChronoSwitchCharacter::Interact);
 		}
+		
+		if (TimeSwitchAction)
+		{
+			EnhancedInput->BindAction(TimeSwitchAction, ETriggerEvent::Started, this, &AChronoSwitchCharacter::OnTimeSwitchPressed);
+		}
 	}
 }
 
@@ -178,28 +205,108 @@ void AChronoSwitchCharacter::Interact()
 		if (BoxTraceFront(OutHit))
 		{
 			AActor* HitActor = OutHit.GetActor();
-			// Cast the hit actor to the IInteractable interface and call Interact if successful.
-			if (IInteractable* HitActorWithInterface = Cast<IInteractable>(HitActor))
+			// Use ImplementsInterface to support Blueprint-only implementations.
+			// Cast<IInteractable> fails if the interface is added via Blueprint Class Settings.
+			if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
 			{
-				if (HitActorWithInterface->IsGrabbable())
+				if (IInteractable::Execute_IsGrabbable(HitActor))
 				{
 					UPrimitiveComponent* HitComponent = OutHit.GetComponent();
-					ObjectPhysicsHandle->GrabComponentAtLocationWithRotation(HitComponent, FName(), HitComponent->GetComponentLocation(), FRotator(0, 0, 0));
-					IsGrabbing = true;
+					
+					// CHECK: The object must simulate physics to be grabbed by the PhysicsHandle.
+					if (HitComponent && HitComponent->IsSimulatingPhysics())
+					{
+						HitComponent->WakeAllRigidBodies(); // Wake up the object if it was sleeping to save resources.
+						ObjectPhysicsHandle->GrabComponentAtLocationWithRotation(HitComponent, FName(), HitComponent->GetComponentLocation(), FRotator(0, 0, 0));
+						IsGrabbing = true;
+					}
 				}
 				else
 				{
-					HitActorWithInterface->Interact();
+					IInteractable::Execute_Interact(HitActor, this);
 				}
 			}
 		}
 	}
 	else
 	{
-		Cast<IInteractable>(ObjectPhysicsHandle->GetGrabbedComponent()->GetOwner())->Release();
+		// Safety check to prevent crashes if the grabbed object was destroyed.
+		if (UPrimitiveComponent* GrabbedComponent = ObjectPhysicsHandle->GetGrabbedComponent())
+		{
+			if (AActor* GrabbedActor = GrabbedComponent->GetOwner())
+			{
+				if (GrabbedActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+				{
+					IInteractable::Execute_Release(GrabbedActor);
+				}
+			}
+		}
 		ObjectPhysicsHandle->ReleaseComponent();
 		IsGrabbing = false;
 	}
+}
+
+void AChronoSwitchCharacter::ExecuteTimeSwitchLogic()
+{
+	AChronoSwitchPlayerState* MyPS = GetPlayerState<AChronoSwitchPlayerState>();
+	AChronoSwitchGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AChronoSwitchGameState>() : nullptr;
+
+	if (!MyPS || !GameState)
+	{
+		return;
+	}
+
+	// The behavior of the time switch depends on the current game mode.
+	switch (GameState->CurrentTimeSwitchMode)
+	{
+		case ETimeSwitchMode::Personal:
+		{
+			// In Personal mode, we switch our own timeline.
+			const uint8 CurrentID = MyPS->GetTimelineID();
+			const uint8 NewID = (CurrentID == 0) ? 1 : 0;
+			MyPS->RequestTimelineChange(NewID);
+			break;
+		}
+		case ETimeSwitchMode::CrossPlayer:
+		{
+			// In CrossPlayer mode, our input requests a switch for the OTHER player.
+			// This must be done via a server RPC for authority.
+			Server_RequestOtherPlayerSwitch();
+			break;
+		}
+		case ETimeSwitchMode::GlobalTimer:
+		default:
+			// In GlobalTimer mode, personal input does nothing.
+			break;
+	}
+}
+
+void AChronoSwitchCharacter::Server_RequestOtherPlayerSwitch_Implementation()
+{
+	// This code runs on the server. Find the other player and switch their timeline.
+	if (CachedOtherPlayerCharacter.IsValid())
+	{
+		if (AChronoSwitchCharacter* OtherChar = Cast<AChronoSwitchCharacter>(CachedOtherPlayerCharacter.Get()))
+		{
+			if (AChronoSwitchPlayerState* OtherPS = OtherChar->GetPlayerState<AChronoSwitchPlayerState>())
+			{
+				const uint8 CurrentID = OtherPS->GetTimelineID();
+				const uint8 NewID = (CurrentID == 0) ? 1 : 0;
+				OtherPS->SetTimelineID(NewID); // Authoritative call
+
+				// Server Replication Priority:
+				// Force immediate replication of the PlayerState to minimize desync time.
+				OtherPS->ForceNetUpdate();
+			}
+		}
+	}
+}
+
+void AChronoSwitchCharacter::Client_ForcedTimelineChange_Implementation(uint8 NewTimelineID)
+{
+	// This RPC is triggered by the Server to force an immediate state update on the Client.
+	// It calls HandleTimelineUpdate, which updates collision, visuals, and flushes the movement buffer.
+	HandleTimelineUpdate(NewTimelineID);
 }
 
 /** Finds the other player character in the world and caches a weak pointer to it for optimization. */
@@ -266,8 +373,10 @@ void AChronoSwitchCharacter::BindToPlayerState()
 {
 	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
 	{
-		PS->OnTimelineIDChanged.AddUObject(this, &AChronoSwitchCharacter::UpdateCollisionChannel);
+		// Bind our handler to the PlayerState's delegate.
+		PS->OnTimelineIDChanged.AddUObject(this, &AChronoSwitchCharacter::HandleTimelineUpdate);
 		
+		// Set the initial collision state WITHOUT triggering cosmetic effects.
 		UpdateCollisionChannel(PS->GetTimelineID());
 	}
 	else
@@ -276,15 +385,32 @@ void AChronoSwitchCharacter::BindToPlayerState()
 	}
 }
 
-/** Updates this character's collision ObjectType to match its current timeline. */
+void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
+{
+	// This function is called by the delegate when a change occurs.
+	
+	// 1. Core Logic: Update physical collision channels.
+	UpdateCollisionChannel(NewTimelineID);
+
+	// 2. Network Correction: Flush Server Moves.
+	// We discard any saved moves based on the old timeline state. This forces the client 
+	// to accept the new server position immediately, preventing rubber banding (snap-back).
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		CMC->FlushServerMoves();
+	}
+
+	// 3. Cosmetics: Trigger visual and sound effects.
+	OnTimelineChangedCosmetic(NewTimelineID);
+	OnTimelineSwitched(NewTimelineID);
+}
+
 void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 {
 	if (!GetCapsuleComponent()) return;
 	
 	// This logic simply changes our character's physical identity.
-	// The ATimelineBaseActor objects will then use this identity to determine collision.
 	ECollisionChannel NewTimelineChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
-	
 	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
 }
 

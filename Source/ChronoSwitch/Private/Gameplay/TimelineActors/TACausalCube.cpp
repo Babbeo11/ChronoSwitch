@@ -11,7 +11,7 @@ ATACausalCube::ATACausalCube()
 	IsAlreadyGrabbed = false;
 }
 
-void ATACausalCube::Interact_Implementation()
+void ATACausalCube::Interact_Implementation(ACharacter* Interactor)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, TEXT("TACausalCube::Interact_Implementation() implementation"));
 }

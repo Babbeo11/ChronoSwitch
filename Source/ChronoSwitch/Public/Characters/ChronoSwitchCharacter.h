@@ -57,6 +57,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
 	TObjectPtr<UInputAction> InteractAction;
 	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
+	TObjectPtr<UInputAction> TimeSwitchAction;
+	
 	// --- Input Callbacks ---
 
 	UFUNCTION()
@@ -74,18 +77,46 @@ protected:
 	UFUNCTION()
 	void Interact();
 	
+	/** Called from the Input Action. This is intended to be implemented in Blueprint to start an animation sequence. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
+	void OnTimeSwitchPressed();
+
+	// --- Network & Replication ---
+
+	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
+	UFUNCTION(Server, Reliable)
+	void Server_RequestOtherPlayerSwitch();
+
 	// --- Timeline Logic ---
+
+	/** Executes the core time switch logic based on the current game mode. Designed to be called from an Anim Notify in Blueprint. */
+	UFUNCTION(BlueprintCallable, Category = "Timeline")
+	void ExecuteTimeSwitchLogic();
 
 	/** Binds this character to its associated PlayerState to listen for timeline changes. */
 	void BindToPlayerState();
 	
-	/** Updates the character's collision ObjectType when its timeline changes. */
+	/** Handler for the PlayerState's OnTimelineIDChanged delegate. Updates collision and triggers cosmetic effects. */
+	void HandleTimelineUpdate(uint8 NewTimelineID);
+
+	/** Updates the character's collision ObjectType. This contains only the core gameplay logic. */
 	void UpdateCollisionChannel(uint8 NewTimelineID);
 	
-	
-	
+	// --- Cosmetic Events ---
+
+	/** Blueprint event called when a timeline switch occurs, for triggering VFX, SFX, and animations. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
+	void OnTimelineSwitched(uint8 NewTimelineID);
+
+	/** Cosmetic event called on all clients (Owner and Proxies) to trigger VFX/SFX. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
+	void OnTimelineChangedCosmetic(uint8 NewTimelineID);
 	
 public:
+	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
+	UFUNCTION(Client, Reliable)
+	void Client_ForcedTimelineChange(uint8 NewTimelineID);
+
 	/** Called every frame. */
 	virtual void Tick(float DeltaTime) override;
 

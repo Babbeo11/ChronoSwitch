@@ -6,6 +6,9 @@
 #include "Interfaces/Interactable.h"
 #include "TimelineBaseActor.generated.h"
 
+/**
+ * Defines how an actor exists across the two timelines.
+ */
 UENUM(BlueprintType)
 enum class EActorTimeline : uint8
 {
@@ -19,6 +22,8 @@ enum class EActorTimeline : uint8
  * The base class for all objects that react to timeline changes.
  * This actor manages two mesh components (Past and Future) and determines their
  * visibility and collision based on the local player's timeline state.
+ * 
+ * It implements the IInteractable interface to allow basic interaction.
 */
 UCLASS(PrioritizeCategories = "Timeline")
 class CHRONOSWITCH_API ATimelineBaseActor : public AActor, public IInteractable
@@ -29,35 +34,28 @@ public:
 	/** Sets default values for this actor's properties. */
 	ATimelineBaseActor();
 	
-	/** Implementation of the IInteractable interface, called when the player interacts with this actor. */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	void Interact();
-	virtual void Interact_Implementation();
+	// --- IInteractable Interface ---
 	
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	bool IsGrabbable();
-	virtual bool IsGrabbable_Implementation();
-	
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	void Release();
-	virtual void Release_Implementation();
+	virtual void Interact_Implementation(ACharacter* Interactor) override;
+	virtual bool IsGrabbable_Implementation() override;
+	virtual void Release_Implementation() override;
 
 protected:
 	// --- Components ---
 
 	/** The mesh representing the object in the Past timeline. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UStaticMeshComponent* PastMesh;
+	TObjectPtr<UStaticMeshComponent> PastMesh;
 	
 	/** The mesh representing the object in the Future timeline. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UStaticMeshComponent* FutureMesh;
+	TObjectPtr<UStaticMeshComponent> FutureMesh;
 	
 	/** Listens for changes in the local player's timeline state. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
 	TObjectPtr<UTimelineObserverComponent> TimelineObserver;
 	
-	// --- Properties ---
+	// --- Configuration ---
 
 	/** Defines how this actor behaves across timelines (e.g., exists only in the past, or in both). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", meta = (DisplayPriority = "0"))
@@ -67,14 +65,16 @@ protected:
 
 	/** Called when the game starts or when spawned. */
 	virtual void BeginPlay() override;
+	
 	/** Called in the editor when a property is changed. Used for visual feedback. */
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
-	// --- Logic ---
+	// --- Timeline Logic ---
 
 	/** Sets the permanent collision profiles for the meshes at the start of the game. */
 	void SetupCollisionProfiles();
+	
 	/** Called by the TimelineObserver when the player's timeline or visor state changes. */
 	UFUNCTION()
 	void HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool bIsVisorActive);
