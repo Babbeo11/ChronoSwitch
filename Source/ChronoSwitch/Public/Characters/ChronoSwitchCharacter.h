@@ -5,7 +5,6 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "ChronoSwitchCharacter.generated.h"
 
 class UTimelineComponent;
@@ -29,7 +28,9 @@ protected:
 	/** Called when the game starts or when spawned. */
 	virtual void BeginPlay() override;
 
-	// --- Components ---
+	// ========================================================================
+	// COMPONENTS
+	// ========================================================================
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FirstPersonCameraComponent;
@@ -37,10 +38,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Mesh, meta = (AllowPrivateAccess = "true"))
 	USkeletalMeshComponent* FirstPersonMeshComponent;
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Interaction, meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UPhysicsHandleComponent> ObjectPhysicsHandle;
-	
-	// --- Input ---
+	// ========================================================================
+	// INPUT
+	// ========================================================================
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
@@ -60,8 +60,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
 	TObjectPtr<UInputAction> TimeSwitchAction;
 	
-	// --- Input Callbacks ---
-
 	UFUNCTION()
 	void Move(const FInputActionValue& Value);
 	
@@ -81,13 +79,17 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimeSwitchPressed();
 
-	// --- Network & Replication ---
+	// ========================================================================
+	// NETWORK & REPLICATION
+	// ========================================================================
 
 	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
 	UFUNCTION(Server, Reliable)
 	void Server_RequestOtherPlayerSwitch();
-	
-	// --- Timeline Logic ---
+
+	// ========================================================================
+	// TIMELINE LOGIC
+	// ========================================================================
 
 	/** Executes the core time switch logic based on the current game mode. Designed to be called from an Anim Notify in Blueprint. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
@@ -102,7 +104,9 @@ protected:
 	/** Updates the character's collision ObjectType. This contains only the core gameplay logic. */
 	void UpdateCollisionChannel(uint8 NewTimelineID);
 	
-	// --- Cosmetic Events ---
+	// ========================================================================
+	// COSMETIC EVENTS
+	// ========================================================================
 
 	/** Blueprint event called when a timeline switch occurs, for triggering VFX, SFX, and animations. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
@@ -112,7 +116,9 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimelineChangedCosmetic(uint8 NewTimelineID);
 	
-	// --- Grabbing & Physics Interaction ---
+	// ========================================================================
+	// INTERACTION & PHYSICS
+	// ========================================================================
 
 	/** Attempts to grab a physics object in front of the character. */
 	void AttemptGrab();
@@ -128,22 +134,23 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_Release();
 
-	// --- Physics handle variables ---
-	
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	float ReachDistance = 300.0f;
 	
 	UPROPERTY(EditAnywhere, Category = "Interaction")
-	float HoldDistance = 150.0f;
-	
-	
-	
+	float HoldDistance = 200.0f;
 	
 public:
+	// ========================================================================
+	// NETWORK & REPLICATION (PUBLIC)
+	// ========================================================================
 	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
 	UFUNCTION(Client, Reliable)
 	void Client_ForcedTimelineChange(uint8 NewTimelineID);
 
+	// ========================================================================
+	// ENGINE OVERRIDES
+	// ========================================================================
 	/** Called every frame. */
 	virtual void Tick(float DeltaTime) override;
 
@@ -157,16 +164,21 @@ private:
 	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
 	FTimerHandle PlayerStateBindTimer;
 	
-	// --- Tick Logic Helpers ---
+	// ========================================================================
+	// INTERNAL HELPERS
+	// ========================================================================
 	
 	/** Finds and caches the other player character in the world. */
 	void CacheOtherPlayerCharacter();
+	
 	/** Handles symmetrical player-vs-player collision logic. */
 	void UpdatePlayerCollision(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
+	
+	/** Configures physics settings for remote players (Simulated Proxies) to prevent jitter or allow dragging. */
+	void ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject);
+
 	/** Handles asymmetrical visibility logic for rendering the other player. */
 	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
-
-	// --- Cached Pointers for Tick Optimization ---
 
 	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
@@ -179,7 +191,10 @@ private:
 	/** Handles client-side physics toggling to prevent jitter when holding objects. */
 	UFUNCTION()
 	void OnRep_GrabbedComponent(UPrimitiveComponent* OldComponent);
-	
+
+	/** Updates the position and rotation of the held object every frame (Kinematic update). */
+	void UpdateHeldObjectTransform();
+
 	/** Performs a trace from the camera to find interactable objects in the world. */
 	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
 };
