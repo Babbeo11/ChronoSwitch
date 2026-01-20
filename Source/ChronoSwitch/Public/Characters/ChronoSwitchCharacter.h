@@ -37,7 +37,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Mesh, meta = (AllowPrivateAccess = "true"))
 	USkeletalMeshComponent* FirstPersonMeshComponent;
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = PhysicsHandle, meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Interaction, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UPhysicsHandleComponent> ObjectPhysicsHandle;
 	
 	// --- Input ---
@@ -86,7 +86,7 @@ protected:
 	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
 	UFUNCTION(Server, Reliable)
 	void Server_RequestOtherPlayerSwitch();
-
+	
 	// --- Timeline Logic ---
 
 	/** Executes the core time switch logic based on the current game mode. Designed to be called from an Anim Notify in Blueprint. */
@@ -112,6 +112,33 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimelineChangedCosmetic(uint8 NewTimelineID);
 	
+	// --- Grabbing & Physics Interaction ---
+
+	/** Attempts to grab a physics object in front of the character. */
+	void AttemptGrab();
+	
+	/** Releases the currently held object. */
+	void Release();
+
+	/** Server RPC: Validates and executes the grab logic. */
+	UFUNCTION(Server, Reliable)
+	void Server_Grab();
+	
+	/** Server RPC: Validates and executes the release logic. */
+	UFUNCTION(Server, Reliable)
+	void Server_Release();
+
+	// --- Physics handle variables ---
+	
+	UPROPERTY(EditAnywhere, Category = "Interaction")
+	float ReachDistance = 300.0f;
+	
+	UPROPERTY(EditAnywhere, Category = "Interaction")
+	float HoldDistance = 150.0f;
+	
+	
+	
+	
 public:
 	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
 	UFUNCTION(Client, Reliable)
@@ -123,6 +150,9 @@ public:
 	/** Called to bind functionality to input. */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
+	/** Required for replicating properties like IsGrabbing. */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 private:
 	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
 	FTimerHandle PlayerStateBindTimer;
@@ -142,8 +172,13 @@ private:
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
 	
-	UPROPERTY(EditAnywhere)
-	bool IsGrabbing;
+	/** The component currently being held. Replicated to handle client-side physics toggling. */
+	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
+	TObjectPtr<UPrimitiveComponent> GrabbedComponent;
+
+	/** Handles client-side physics toggling to prevent jitter when holding objects. */
+	UFUNCTION()
+	void OnRep_GrabbedComponent(UPrimitiveComponent* OldComponent);
 	
 	/** Performs a trace from the camera to find interactable objects in the world. */
 	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);

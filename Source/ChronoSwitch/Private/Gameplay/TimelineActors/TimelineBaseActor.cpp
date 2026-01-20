@@ -94,6 +94,9 @@ void ATimelineBaseActor::SetupCollisionProfiles()
 		const ECollisionChannel MyTraceChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(MeshTimelineID);
 
 		Mesh->SetCollisionObjectType(MyObjectChannel);
+		
+		// Ensure collision is enabled for queries (traces) and physics.
+		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
 		// "Ignore All, Enable Selectively" pattern for robust collision control.
 		Mesh->SetCollisionResponseToAllChannels(ECR_Ignore);
