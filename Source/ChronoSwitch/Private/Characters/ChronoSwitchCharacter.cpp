@@ -255,8 +255,8 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 
 			// Change ObjectType to PhysicsBody while holding.
 			// This ensures the Simulated Proxy (which ignores Timeline Channels 1/2) can still collide with it.
-			ComponentToGrab->SetCollisionObjectType(ECC_PhysicsBody);
-			ComponentToGrab->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+			//ComponentToGrab->SetCollisionObjectType(ECC_PhysicsBody);
+			//ComponentToGrab->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 			
 			// Update the replicated property so clients know an object is being held.
 			GrabbedComponent = ComponentToGrab; 
@@ -315,7 +315,7 @@ void AChronoSwitchCharacter::OnRep_GrabbedComponent(UPrimitiveComponent* OldComp
 		GrabbedComponent->IgnoreActorWhenMoving(this, true);
 
 		// FIX: Change ObjectType to PhysicsBody while holding.
-		// The Simulated Proxy ignores Timeline Channels (3/4) to avoid floor jitter,
+		// The Simulated Proxy ignores Timeline Channels (1/2) to avoid floor jitter,
 		// so we must become a "PhysicsBody" to be detected by its capsule collision.
 		GrabbedComponent->SetCollisionObjectType(ECC_PhysicsBody);
 		GrabbedComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
@@ -370,6 +370,10 @@ void AChronoSwitchCharacter::ExecuteTimeSwitchLogic()
 			const uint8 CurrentID = MyPS->GetTimelineID();
 			const uint8 NewID = (CurrentID == 0) ? 1 : 0;
 			MyPS->RequestTimelineChange(NewID);
+			if (GrabbedComponent)
+			{
+				Release();
+			}
 			break;
 		}
 		case ETimeSwitchMode::CrossPlayer:
@@ -398,6 +402,7 @@ void AChronoSwitchCharacter::Server_RequestOtherPlayerSwitch_Implementation()
 				const uint8 CurrentID = OtherPS->GetTimelineID();
 				const uint8 NewID = (CurrentID == 0) ? 1 : 0;
 				OtherPS->SetTimelineID(NewID); // Authoritative call
+				OtherChar->Release();
 
 				// Server Replication Priority:
 				// Force immediate replication of the PlayerState to minimize desync time.

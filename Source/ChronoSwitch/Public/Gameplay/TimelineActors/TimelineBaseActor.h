@@ -44,11 +44,11 @@ protected:
 	// --- Components ---
 
 	/** The mesh representing the object in the Past timeline. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> PastMesh;
 	
 	/** The mesh representing the object in the Future timeline. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> FutureMesh;
 	
 	/** Listens for changes in the local player's timeline state. */

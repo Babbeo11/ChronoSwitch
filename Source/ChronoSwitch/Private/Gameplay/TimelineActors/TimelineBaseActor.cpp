@@ -3,7 +3,7 @@
 ATimelineBaseActor::ATimelineBaseActor()
 {
 	// This actor does not need to tick. Its state is updated via event delegates.
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 	
 	// A simple scene component as the root provides a clean attachment point.
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
