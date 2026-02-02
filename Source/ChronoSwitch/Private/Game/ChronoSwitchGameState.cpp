@@ -21,7 +21,7 @@ void AChronoSwitchGameState::BeginPlay()
 	{
 		if (CurrentTimeSwitchMode == ETimeSwitchMode::GlobalTimer)
 		{
-			GetWorld()->GetTimerManager().SetTimer(GlobalSwitchTimerHandle, this, &AChronoSwitchGameState::PerformGlobalSwitch, 5.0f, true);
+			GetWorld()->GetTimerManager().SetTimer(GlobalSwitchTimerHandle, this, &AChronoSwitchGameState::PerformGlobalSwitch, GlobalSwitchTime, true);
 		}
 	}
 }
@@ -46,7 +46,7 @@ void AChronoSwitchGameState::SetTimeSwitchMode(ETimeSwitchMode NewMode)
 		// If the new mode is GlobalTimer, start the periodic switch.
 		if (CurrentTimeSwitchMode == ETimeSwitchMode::GlobalTimer)
 		{
-			GetWorld()->GetTimerManager().SetTimer(GlobalSwitchTimerHandle, this, &AChronoSwitchGameState::PerformGlobalSwitch, 5.0f, true);
+			GetWorld()->GetTimerManager().SetTimer(GlobalSwitchTimerHandle, this, &AChronoSwitchGameState::PerformGlobalSwitch, GlobalSwitchTime, true);
 		}
 	}
 }

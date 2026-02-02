@@ -22,11 +22,12 @@ public:
 	/** Sets default values for this character's properties. */
 	AChronoSwitchCharacter();
 
-	
-
 protected:
 	/** Called when the game starts or when spawned. */
 	virtual void BeginPlay() override;
+
+	/** Required for replicating properties. */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// ========================================================================
 	// COMPONENTS
@@ -60,9 +61,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
 	TObjectPtr<UInputAction> TimeSwitchAction;
 	
+	/** Handles movement input. */
 	UFUNCTION()
 	void Move(const FInputActionValue& Value);
 	
+	/** Handles look input. Sensitivity is reduced when holding objects. */
 	UFUNCTION()
 	void Look(const FInputActionValue& Value);
 	
@@ -72,20 +75,13 @@ protected:
 	UFUNCTION()
 	void JumpStop();
 	
+	/** Handles interaction input (Release > Interact > Grab). */
 	UFUNCTION()
 	void Interact();
 	
 	/** Called from the Input Action. This is intended to be implemented in Blueprint to start an animation sequence. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimeSwitchPressed();
-
-	// ========================================================================
-	// NETWORK & REPLICATION
-	// ========================================================================
-
-	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
-	UFUNCTION(Server, Reliable)
-	void Server_RequestOtherPlayerSwitch();
 
 	// ========================================================================
 	// TIMELINE LOGIC
@@ -101,7 +97,7 @@ protected:
 	/** Handler for the PlayerState's OnTimelineIDChanged delegate. Updates collision and triggers cosmetic effects. */
 	void HandleTimelineUpdate(uint8 NewTimelineID);
 
-	/** Updates the character's collision ObjectType. This contains only the core gameplay logic. */
+	/** Updates the character's collision ObjectType based on the timeline. */
 	void UpdateCollisionChannel(uint8 NewTimelineID);
 	
 	// ========================================================================
@@ -120,10 +116,10 @@ protected:
 	// INTERACTION & PHYSICS
 	// ========================================================================
 
-	/** Attempts to grab a physics object in front of the character. */
+	/** Initiates the grab logic. */
 	void AttemptGrab();
 	
-	/** Releases the currently held object. */
+	/** Initiates the release logic. */
 	void Release();
 
 	/** Server RPC: Validates and executes the grab logic. */
@@ -134,6 +130,10 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_Release();
 
+	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
+	UFUNCTION(Server, Reliable)
+	void Server_RequestOtherPlayerSwitch();
+
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	float ReachDistance = 300.0f;
 	
@@ -142,7 +142,7 @@ protected:
 	
 public:
 	// ========================================================================
-	// NETWORK & REPLICATION (PUBLIC)
+	// PUBLIC NETWORK API
 	// ========================================================================
 	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
 	UFUNCTION(Client, Reliable)
@@ -157,9 +157,6 @@ public:
 	/** Called to bind functionality to input. */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	
-	/** Required for replicating properties like IsGrabbing. */
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
 private:
 	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
 	FTimerHandle PlayerStateBindTimer;
@@ -174,7 +171,7 @@ private:
 	/** Handles symmetrical player-vs-player collision logic. */
 	void UpdatePlayerCollision(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
 	
-	/** Configures physics settings for remote players (Simulated Proxies) to prevent jitter or allow dragging. */
+	/** Configures physics settings for remote players (Simulated Proxies) to handle stability vs dragging. */
 	void ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject);
 
 	/** Handles asymmetrical visibility logic for rendering the other player. */
@@ -184,17 +181,28 @@ private:
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
 	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
 	
-	/** The component currently being held. Replicated to handle client-side physics toggling. */
+	/** The component currently being held. Replicated to handle client-side physics state. */
 	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
 	TObjectPtr<UPrimitiveComponent> GrabbedComponent;
 
-	/** Handles client-side physics toggling to prevent jitter when holding objects. */
+	/** Handles client-side physics state changes when holding objects. */
 	UFUNCTION()
 	void OnRep_GrabbedComponent(UPrimitiveComponent* OldComponent);
 
 	/** Updates the position and rotation of the held object every frame (Kinematic update). */
-	void UpdateHeldObjectTransform();
+	void UpdateHeldObjectTransform(float DeltaTime);
+
+	/** Tracks the local position of the held object to prevent network jitter. */
+	FVector HeldObjectPos;
+
+	/** Stores the rotation of the object relative to the camera at the moment of grabbing. */
+	UPROPERTY(Replicated)
+	FRotator GrabbedRelativeRotation;
 
 	/** Performs a trace from the camera to find interactable objects in the world. */
 	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
+	
+	/** Stores the original collision channel of the grabbed object to restore it upon release. */
+	UPROPERTY(Replicated)
+	TEnumAsByte<ECollisionChannel> GrabbedMeshOriginalCollision;
 };

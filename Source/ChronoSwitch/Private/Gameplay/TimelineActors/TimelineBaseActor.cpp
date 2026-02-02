@@ -92,6 +92,10 @@ void ATimelineBaseActor::SetupCollisionProfiles()
 
 		const ECollisionChannel MyObjectChannel = UTimelineObserverComponent::GetCollisionChannelForTimeline(MeshTimelineID);
 		const ECollisionChannel MyTraceChannel = UTimelineObserverComponent::GetCollisionTraceChannelForTimeline(MeshTimelineID);
+		
+		// Determine Player Channels based on the mesh's timeline ID.
+		const ECollisionChannel MyPlayerChannel = (MeshTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
+		const ECollisionChannel OtherPlayerChannel = (MeshTimelineID == 0) ? ECC_GameTraceChannel2 : ECC_GameTraceChannel1;
 
 		Mesh->SetCollisionObjectType(MyObjectChannel);
 		
@@ -107,9 +111,16 @@ void ATimelineBaseActor::SetupCollisionProfiles()
 		// 2. Block standard world geometry (Floor, Walls).
 		Mesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
 		Mesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+		Mesh->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block); // Block held objects
 
 		// 3. Block interaction traces from the SAME timeline.
 		Mesh->SetCollisionResponseToChannel(MyTraceChannel, ECR_Block);
+		
+		// 4. Player Collision Management:
+		// Ignore generic Pawns, but Block the specific Player Channel for this timeline.
+		Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		Mesh->SetCollisionResponseToChannel(MyPlayerChannel, ECR_Block);
+		Mesh->SetCollisionResponseToChannel(OtherPlayerChannel, ECR_Ignore);
 	};
 	
 	// Apply configuration based on the actor's timeline mode.

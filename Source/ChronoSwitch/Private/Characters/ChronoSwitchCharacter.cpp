@@ -1,7 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-
-#include "ChronoSwitch/Public/Characters/ChronoSwitchCharacter.h"
+﻿#include "ChronoSwitch/Public/Characters/ChronoSwitchCharacter.h"
 #include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -23,6 +20,8 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 {
 	// Enable ticking to handle per-frame logic for player-vs-player interaction.
 	PrimaryActorTick.bCanEverTick = true;
+	// Update after physics and camera to prevent visual lag for held objects.
+	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
 	
 	// Create and configure the first-person camera.
 	FirstPersonCameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
@@ -40,6 +39,7 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 	
 	// Sets default private variables
 	GrabbedComponent = nullptr;
+	GrabbedRelativeRotation = FRotator::ZeroRotator;
 	
 	// The third-person body mesh should not be visible to the owning player.
 	GetMesh()->SetOwnerNoSee(true);
@@ -70,6 +70,8 @@ void AChronoSwitchCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedComponent);
+	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedMeshOriginalCollision);
+	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedRelativeRotation);
 }
 
 void AChronoSwitchCharacter::Tick(float DeltaTime)
@@ -98,15 +100,15 @@ void AChronoSwitchCharacter::Tick(float DeltaTime)
 		}
 	}
 
-	// If all required data is available, execute the interaction logic.
+	// Execute interaction and visibility logic.
 	if (CachedMyPlayerState.IsValid() && CachedOtherPlayerState.IsValid())
 	{
 		UpdatePlayerCollision(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get());
 		UpdatePlayerVisibility(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get());
 	}
 	
-	// Update the position of the held object (Kinematic Attachment).
-	UpdateHeldObjectTransform();
+	// Update held object transform (Kinematic).
+	UpdateHeldObjectTransform(DeltaTime);
 }
 
 void AChronoSwitchCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -160,11 +162,8 @@ void AChronoSwitchCharacter::Look(const FInputActionValue& Value)
 {
 	FVector2D LookAxisValue = Value.Get<FVector2D>();
 	
-	// LIMITATION: When holding an object, we reduce the turn rate.
-	// This serves two purposes:
-	// 1. Gameplay: Gives a sense of weight to the object.
-	// 2. Network: Prevents the player from spinning too fast, which causes
-	//    Simulated Proxies (passengers) to detach due to network lag.
+	// Reduce sensitivity when holding an object.
+	// This simulates weight and prevents network desync during fast turns.
 	if (GrabbedComponent)
 	{
 		LookAxisValue *= 0.25f; // Reduce sensitivity to 25%
@@ -243,20 +242,37 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 		// Validate that the component exists and simulates physics.
 		if (ComponentToGrab && ComponentToGrab->IsSimulatingPhysics())
 		{
-			// Wake up the physics body to ensure it reacts immediately to the handle.
+			// Prevent grabbing the current movement base to avoid physics loops.
+			if (GetCharacterMovement() && GetCharacterMovement()->GetMovementBase() == ComponentToGrab)
+			{
+				return;
+			}
+
+			// Prepare object for kinematic attachment.
 			ComponentToGrab->WakeAllRigidBodies(); 
-			
-			// Disable physics simulation to attach it kinematically.
-			// This fixes the "not smooth" feeling on the Server by removing physics engine noise.
 			ComponentToGrab->SetSimulatePhysics(false);
 
-			// Ignore collision with the holding character to prevent self-collision issues.
+			// Ignore collision with self.
 			ComponentToGrab->IgnoreActorWhenMoving(this, true);
+			
+			// Make character ignore the object to prevent "bootstrapping" (flying while standing on held object).
+			if (AActor* OwnerActor = ComponentToGrab->GetOwner())
+			{
+				MoveIgnoreActorAdd(OwnerActor);
+			}
 
-			// Change ObjectType to PhysicsBody while holding.
-			// This ensures the Simulated Proxy (which ignores Timeline Channels 1/2) can still collide with it.
-			//ComponentToGrab->SetCollisionObjectType(ECC_PhysicsBody);
-			//ComponentToGrab->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+			GrabbedMeshOriginalCollision = ComponentToGrab->GetCollisionObjectType();
+			
+			// Temporarily change ObjectType to PhysicsBody to allow collision with Simulated Proxies.
+			ComponentToGrab->SetCollisionObjectType(ECC_PhysicsBody);
+			
+			// Calculate relative rotation (Yaw only) to keep the object upright.
+			FVector CamLoc;
+			FRotator CamRot;
+			GetActorEyesViewPoint(CamLoc, CamRot);
+			
+			FRotator ObjectRot = ComponentToGrab->GetComponentRotation();
+			GrabbedRelativeRotation = FRotator(0.0f, ObjectRot.Yaw - CamRot.Yaw, 0.0f);
 			
 			// Update the replicated property so clients know an object is being held.
 			GrabbedComponent = ComponentToGrab; 
@@ -270,28 +286,25 @@ void AChronoSwitchCharacter::Server_Release_Implementation()
 	{
 		UPrimitiveComponent* GrabbedMesh = GrabbedComponent;
 
-		// Re-enable collision between the object and the character.
+		// Restore collision settings.
 		GrabbedMesh->IgnoreActorWhenMoving(this, false);
 		
-		// Also ensure we stop ignoring the other player (in case we were lifting them).
+		if (AActor* OwnerActor = GrabbedMesh->GetOwner())
+		{
+			MoveIgnoreActorRemove(OwnerActor);
+		}
+		
 		if (CachedOtherPlayerCharacter.IsValid())
 		{
 			GrabbedMesh->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), false);
 		}
 		
-		// Re-enable physics simulation so it falls naturally.
+		// Restore physics simulation.
 		GrabbedMesh->SetSimulatePhysics(true);
 		GrabbedMesh->WakeAllRigidBodies();
 
-		// Restore the correct Timeline Object Channel (1 or 2).
-		if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
-		{
-			const ECollisionChannel OriginalChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
-			GrabbedMesh->SetCollisionObjectType(OriginalChannel);
-		}
-		
-		// Ensure it blocks the Pawn channel again.
-		GrabbedMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		// Restore original collision channel.
+		GrabbedMesh->SetCollisionObjectType(GrabbedMeshOriginalCollision);
 	}
 
 	// Clear the replicated property.
@@ -300,54 +313,44 @@ void AChronoSwitchCharacter::Server_Release_Implementation()
 
 void AChronoSwitchCharacter::OnRep_GrabbedComponent(UPrimitiveComponent* OldComponent)
 {
-	// --- Client-Side Physics Optimization ---
+	// Handle Client-side physics state.
 	
-	// Case 1: We just grabbed an object (GrabbedComponent is valid).
-	// We disable physics simulation on the client side.
-	// Why? Because the Server is updating the object's position via the Physics Handle.
-	// If the client also simulates physics (gravity), it fights the server updates, causing visual jitter.
+	// Grabbed: Disable physics to prevent fighting with server updates.
 	if (GrabbedComponent)
 	{
 		GrabbedComponent->SetSimulatePhysics(false);
 		
-		// FIX: Ignore collision with self on Client too, otherwise the Sweep in Tick 
-		// will instantly hit our own capsule and get stuck.
 		GrabbedComponent->IgnoreActorWhenMoving(this, true);
 
-		// FIX: Change ObjectType to PhysicsBody while holding.
-		// The Simulated Proxy ignores Timeline Channels (1/2) to avoid floor jitter,
-		// so we must become a "PhysicsBody" to be detected by its capsule collision.
+		// Ignore object locally.
+		if (AActor* OwnerActor = GrabbedComponent->GetOwner())
+		{
+			MoveIgnoreActorAdd(OwnerActor);
+		}
+
+		// Change ObjectType to PhysicsBody while holding.
 		GrabbedComponent->SetCollisionObjectType(ECC_PhysicsBody);
-		GrabbedComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
 	}
 
-	// Case 2: We just released an object (OldComponent was valid).
-	// We re-enable physics simulation so the object falls/tumbles naturally on the client.
+	// Released: Re-enable physics.
 	if (OldComponent && IsValid(OldComponent))
 	{
 		OldComponent->SetSimulatePhysics(true);
 		OldComponent->WakeAllRigidBodies();
 		
-		// Restore collision with self.
 		OldComponent->IgnoreActorWhenMoving(this, false);
 
-		// Restore collision with other player.
+		if (AActor* OwnerActor = OldComponent->GetOwner())
+		{
+			MoveIgnoreActorRemove(OwnerActor);
+		}
+
 		if (CachedOtherPlayerCharacter.IsValid())
 		{
 			OldComponent->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), false);
 		}
 
-		// Restore the correct Timeline Object Channel (1 or 2).
-		// We assume the object belongs to the current timeline of the player who held it.
-		if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
-		{
-			
-			const ECollisionChannel OriginalChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
-			OldComponent->SetCollisionObjectType(OriginalChannel);
-		}
-		
-		// Ensure it blocks the Pawn channel again (standard behavior).
-		OldComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+		OldComponent->SetCollisionObjectType(GrabbedMeshOriginalCollision);
 	}
 }
 
@@ -384,8 +387,9 @@ void AChronoSwitchCharacter::ExecuteTimeSwitchLogic()
 			break;
 		}
 		case ETimeSwitchMode::GlobalTimer:
+		case ETimeSwitchMode::None:
 		default:
-			// In GlobalTimer mode, personal input does nothing.
+			// In GlobalTimer mode and None, personal input does nothing.
 			break;
 	}
 }
@@ -404,8 +408,7 @@ void AChronoSwitchCharacter::Server_RequestOtherPlayerSwitch_Implementation()
 				OtherPS->SetTimelineID(NewID); // Authoritative call
 				OtherChar->Release();
 
-				// Server Replication Priority:
-				// Force immediate replication of the PlayerState to minimize desync time.
+				// Force immediate replication to minimize desync.
 				OtherPS->ForceNetUpdate();
 			}
 		}
@@ -414,8 +417,7 @@ void AChronoSwitchCharacter::Server_RequestOtherPlayerSwitch_Implementation()
 
 void AChronoSwitchCharacter::Client_ForcedTimelineChange_Implementation(uint8 NewTimelineID)
 {
-	// This RPC is triggered by the Server to force an immediate state update on the Client.
-	// It calls HandleTimelineUpdate, which updates collision, visuals, and flushes the movement buffer.
+	// Force immediate state update and flush movement buffer.
 	HandleTimelineUpdate(NewTimelineID);
 }
 
@@ -429,9 +431,7 @@ void AChronoSwitchCharacter::CacheOtherPlayerCharacter()
 		{
 			CachedOtherPlayerCharacter = FoundChar;
 			
-			// FIX: Ensure the other player ticks AFTER this character.
-			// This solves the 1-frame lag when carrying the other player on the Server, as their 
-			// CharacterMovementComponent will process the new position of the held object immediately.
+			// Ensure other player ticks after this one to reduce lag when carrying them.
 			CachedOtherPlayerCharacter->AddTickPrerequisiteActor(this);
 			
 			return; // Found it, no need to continue looping
@@ -442,8 +442,6 @@ void AChronoSwitchCharacter::CacheOtherPlayerCharacter()
 /** Handles symmetrical player-vs-player collision. This logic runs on all machines. */
 void AChronoSwitchCharacter::UpdatePlayerCollision(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS)
 {
-	// Each character is responsible for deciding whether to ignore the other character for movement.
-	// This ensures server and client simulations agree, preventing rubber-banding.
 	if (!CachedOtherPlayerCharacter.IsValid()) return;
 	
 	const bool bAreInSameTimeline = (MyPS->GetTimelineID() == OtherPS->GetTimelineID());
@@ -465,7 +463,11 @@ void AChronoSwitchCharacter::UpdatePlayerCollision(AChronoSwitchPlayerState* MyP
 		{
 			// Check if the proxy is standing on a physics object (e.g., a cube being dragged).
 			UPrimitiveComponent* BaseComponent = OtherChar->GetMovementBase();
-			const bool bIsOnPhysicsObject = BaseComponent && BaseComponent->IsSimulatingPhysics();
+			
+			// Consider it a physics object if it simulates physics OR if it is the object we are currently holding.
+			// Held objects are kinematic (SimulatePhysics=false) but act as moving platforms.
+			const bool bIsHeldObject = (BaseComponent && BaseComponent == GrabbedComponent);
+			const bool bIsOnPhysicsObject = (BaseComponent && BaseComponent->IsSimulatingPhysics()) || bIsHeldObject;
 
 			ConfigureSimulatedProxyPhysics(OtherChar, OtherPS, bIsOnPhysicsObject);
 		}
@@ -479,9 +481,8 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 
 	if (!ProxyCMC || !ProxyCapsule) return;
 
-	// HYBRID PHYSICS LOGIC:
-	// We switch between "Dragging Mode" (Physics Enabled) and "Stability Mode" (Physics Disabled)
-	// to handle both moving platforms and static floors without jitter.
+	// Switch between "Dragging Mode" (Physics Enabled) and "Stability Mode" (Physics Disabled)
+	// to handle moving platforms and static floors.
 
 	if (bIsOnPhysicsObject)
 	{
@@ -500,11 +501,17 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 		{
 			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
 			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
+			// Block Past Objects (Channel 3) so they can stand on the held cube
+			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);
+			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Ignore);
 		}
 		else // Future
 		{
 			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
 			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Block);
+			// Block Future Objects (Channel 4) so they can stand on the held cube
+			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore);
+			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Block);
 		}
 	}
 	else
@@ -520,10 +527,13 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 		ProxyCapsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
 		ProxyCapsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
 		
-		// Ignore Timeline Collision Channels (1 & 2)
+		// Ignore Timeline Collision Channels (1 & 2) to prevent jitter.
 		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
 		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
 
+		// Block PhysicsBody so we can be pushed by held objects.
+		ProxyCapsule->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block);
+		
 		// Ignore Timeline Interaction/Object Channels (3 & 4) to prevent jitter on static floors.
 		// NOTE: This affects the CAPSULE collision, not the Interaction Trace. Interactions will still work.
 		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore);
@@ -531,32 +541,66 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 	}
 }
 
-void AChronoSwitchCharacter::UpdateHeldObjectTransform()
+void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 {
-	// We use a direct kinematic update for BOTH Server and Client to ensure perfect smoothness.
-	// The Physics Handle was causing jitter on the Server due to its elastic nature.
+	// Kinematic update for held object to ensure smoothness on Server and Client.
 	if (GrabbedComponent && (HasAuthority() || IsLocallyControlled()))
 	{
 		FVector CameraLoc;
 		FRotator CameraRot;
 		GetActorEyesViewPoint(CameraLoc, CameraRot);
 		
-		const FVector TargetLocation = CameraLoc + CameraRot.Vector() * HoldDistance;
-		const FRotator TargetRotation = FRotator(0, CameraRot.Yaw, 0);
+		const FVector IdealTargetLocation = CameraLoc + CameraRot.Vector() * HoldDistance;
+		
+		// Interpolate for smooth movement and weight.
+		const FVector CurrentLoc = GrabbedComponent->GetComponentLocation();
+		const FVector TargetLocation = FMath::VInterpTo(CurrentLoc, IdealTargetLocation, DeltaTime, 20.0f);
+		
+		// Apply Yaw offset to Camera Yaw. Keep Pitch and Roll zero to keep the object upright.
+		const FRotator TargetRotation = FRotator(0.0f, CameraRot.Yaw + GrabbedRelativeRotation.Yaw, 0.0f);
 
-		// FIX: Allow lifting the other player.
-		// If the other player is standing on the object, we ignore collision during the move 
-		// so the object can move UP, and the CharacterMovementComponent will handle lifting the player.
+		// Allow lifting the other player by ignoring collision if they are standing on the object.
 		if (CachedOtherPlayerCharacter.IsValid())
 		{
-			const bool bIsCarrying = (CachedOtherPlayerCharacter->GetMovementBase() == GrabbedComponent);
-			GrabbedComponent->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), bIsCarrying);
+			bool bShouldIgnore = (CachedOtherPlayerCharacter->GetMovementBase() == GrabbedComponent);
+
+			// Enforce timeline isolation manually since PhysicsBody collides with everything.
+			if (CachedOtherPlayerState.IsValid() && CachedMyPlayerState.IsValid())
+			{
+				if (CachedOtherPlayerState->GetTimelineID() != CachedMyPlayerState->GetTimelineID())
+				{
+					bShouldIgnore = true;
+				}
+			}
+			
+			GrabbedComponent->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), bShouldIgnore);
 		}
 
-		// Use Sweep (bSweep=true) so the object stops against obstacles (like other players).
-		// This effectively makes the object kinematic while held, preventing clipping.
+		// Perform kinematic move with sweep.
 		FHitResult Hit;
 		GrabbedComponent->SetWorldLocationAndRotation(TargetLocation, TargetRotation, true, &Hit);
+
+		// Handle sliding along walls/floors.
+		if (Hit.bBlockingHit)
+		{
+			const FVector BlockedLoc = GrabbedComponent->GetComponentLocation();
+			const FVector DesiredDelta = TargetLocation - BlockedLoc;
+
+			FVector SlideDelta = FVector::VectorPlaneProject(DesiredDelta, Hit.ImpactNormal);
+
+			// Apply friction if dragging on ground.
+			if (Hit.ImpactNormal.Z > 0.7f)
+			{
+				const FVector TargetSlidePos = BlockedLoc + SlideDelta;
+				const FVector NewPos = FMath::VInterpTo(BlockedLoc, TargetSlidePos, DeltaTime, 15.0f);
+				SlideDelta = NewPos - BlockedLoc;
+			}
+
+			if (!SlideDelta.IsNearlyZero(0.1f))
+			{
+				GrabbedComponent->SetWorldLocationAndRotation(BlockedLoc + SlideDelta, TargetRotation, true, &Hit);
+			}
+		}
 	}
 }
 
@@ -606,18 +650,14 @@ void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
 {
 	// This function is called by the delegate when a change occurs.
 	
-	// 1. Core Logic: Update physical collision channels.
 	UpdateCollisionChannel(NewTimelineID);
 
-	// 2. Network Correction: Flush Server Moves.
-	// We discard any saved moves based on the old timeline state. This forces the client 
-	// to accept the new server position immediately, preventing rubber banding (snap-back).
+	// Flush server moves to prevent rubber banding.
 	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
 	{
 		CMC->FlushServerMoves();
 	}
 
-	// 3. Cosmetics: Trigger visual and sound effects.
 	OnTimelineChangedCosmetic(NewTimelineID);
 	OnTimelineSwitched(NewTimelineID);
 }
@@ -626,9 +666,23 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 {
 	if (!GetCapsuleComponent()) return;
 	
-	// This logic simply changes our character's physical identity.
 	ECollisionChannel NewTimelineChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
 	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
+
+	// Simulated Proxies manage their own collision in ConfigureSimulatedProxyPhysics.
+	if (GetLocalRole() == ROLE_SimulatedProxy) return;
+
+	// Configure Authority collision responses.
+	if (NewTimelineID == 0) // Past
+	{
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);  // Block Past Objects
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Ignore); // Ignore Future Objects
+	}
+	else // Future
+	{
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore); // Ignore Past Objects
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Block);  // Block Future Objects
+	}
 }
 
 /** Performs a box trace from the camera to find an interactable object. */

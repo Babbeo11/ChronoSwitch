@@ -16,6 +16,7 @@
 UENUM(BlueprintType)
 enum class ETimeSwitchMode : uint8
 {
+	None,           // No time switches occur.
 	Personal,       // Players switch their own timeline manually.
 	GlobalTimer,    // The server switches everyone's timeline periodically.
 	CrossPlayer     // Players switch the OTHER player's timeline.
@@ -41,6 +42,9 @@ public:
 	/** Sets the current time switch mode. Can only be called on the server. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Game Rules")
 	void SetTimeSwitchMode(ETimeSwitchMode NewMode);
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game Rules", meta = (DisplayPriority = "0"))
+	float GlobalSwitchTime = 5.0f;
 	
 	/** The current mode governing how timeline switches occur. Replicated to all clients. */
 	UPROPERTY(ReplicatedUsing = OnRep_TimeSwitchMode, EditAnywhere, BlueprintReadWrite, Category = "Game Rules", meta = (DisplayPriority = "0"))
