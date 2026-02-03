@@ -140,6 +140,14 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	float HoldDistance = 200.0f;
 	
+	//!!!Check if UPROPERTY is needed!!!
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
+	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
+	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
+	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
+	
 public:
 	// ========================================================================
 	// PUBLIC NETWORK API
@@ -177,9 +185,7 @@ private:
 	/** Handles asymmetrical visibility logic for rendering the other player. */
 	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
 
-	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
-	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
-	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
+	
 	
 	/** The component currently being held. Replicated to handle client-side physics state. */
 	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
