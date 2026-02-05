@@ -18,8 +18,8 @@ enum class ETimeSwitchMode : uint8
 {
 	None,           // No time switches occur.
 	Personal,       // Players switch their own timeline manually.
-	GlobalTimer,    // The server switches everyone's timeline periodically.
-	CrossPlayer     // Players switch the OTHER player's timeline.
+	CrossPlayer,     // Players switch the OTHER player's timeline.
+	GlobalTimer    // The server switches everyone's timeline periodically.
 };
 
 /**
@@ -50,6 +50,14 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_TimeSwitchMode, EditAnywhere, BlueprintReadWrite, Category = "Game Rules", meta = (DisplayPriority = "0"))
 	ETimeSwitchMode CurrentTimeSwitchMode;
 	
+	/** Timer function called periodically when in GlobalTimer mode. Switches all players. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly ,Category = "Game Rules")
+	void PerformGlobalSwitch();
+	
+	/** Forces all players to switch to a specific timeline ID (0 or 1). */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Game Rules")
+	void SetGlobalTimeline(uint8 TargetID);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -57,9 +65,6 @@ private:
 	/** RepNotify for CurrentTimeSwitchMode. Called on clients when the mode changes. */
 	UFUNCTION()
 	void OnRep_TimeSwitchMode();
-	
-	/** Timer function called periodically when in GlobalTimer mode. Switches all players. */
-	void PerformGlobalSwitch();
 
 	/** Handle for the global switch timer. */
 	FTimerHandle GlobalSwitchTimerHandle;

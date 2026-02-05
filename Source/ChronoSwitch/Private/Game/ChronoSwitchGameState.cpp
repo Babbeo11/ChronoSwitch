@@ -75,3 +75,19 @@ void AChronoSwitchGameState::PerformGlobalSwitch()
 		}
 	}
 }
+
+void AChronoSwitchGameState::SetGlobalTimeline(uint8 TargetID)
+{
+	// Iterates through all connected players and forces them to a specific timeline.
+	for (APlayerState* PS : PlayerArray)
+	{
+		if (AChronoSwitchPlayerState* ChronoPS = Cast<AChronoSwitchPlayerState>(PS))
+		{
+			// Only switch if they are not already in the target timeline.
+			if (ChronoPS->GetTimelineID() != TargetID)
+			{
+				ChronoPS->SetTimelineID(TargetID);
+			}
+		}
+	}
+}

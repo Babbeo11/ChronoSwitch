@@ -19,30 +19,41 @@ class CHRONOSWITCH_API AChronoSwitchCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
+#pragma region Lifecycle
 	/** Sets default values for this character's properties. */
 	AChronoSwitchCharacter();
 
+	/** Called every frame. */
+	virtual void Tick(float DeltaTime) override;
+
+	/** Called to bind functionality to input. */
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+#pragma endregion
+
+#pragma region Timeline System Public
+	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
+	UFUNCTION(Client, Reliable)
+	void Client_ForcedTimelineChange(uint8 NewTimelineID);
+#pragma endregion
+
 protected:
+#pragma region Lifecycle
 	/** Called when the game starts or when spawned. */
 	virtual void BeginPlay() override;
 
 	/** Required for replicating properties. */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+#pragma endregion
 
-	// ========================================================================
-	// COMPONENTS
-	// ========================================================================
-
+#pragma region Components
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FirstPersonCameraComponent;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Mesh, meta = (AllowPrivateAccess = "true"))
 	USkeletalMeshComponent* FirstPersonMeshComponent;
-	
-	// ========================================================================
-	// INPUT
-	// ========================================================================
+#pragma endregion
 
+#pragma region Input
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Input)
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;
 	
@@ -82,11 +93,9 @@ protected:
 	/** Called from the Input Action. This is intended to be implemented in Blueprint to start an animation sequence. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimeSwitchPressed();
+#pragma endregion
 
-	// ========================================================================
-	// TIMELINE LOGIC
-	// ========================================================================
-
+#pragma region Timeline System
 	/** Executes the core time switch logic based on the current game mode. Designed to be called from an Anim Notify in Blueprint. */
 	UFUNCTION(BlueprintCallable, Category = "Timeline")
 	void ExecuteTimeSwitchLogic();
@@ -100,22 +109,26 @@ protected:
 	/** Updates the character's collision ObjectType based on the timeline. */
 	void UpdateCollisionChannel(uint8 NewTimelineID);
 	
-	// ========================================================================
-	// COSMETIC EVENTS
-	// ========================================================================
-
+	/** Checks if switching to the other timeline would cause a collision. */
+	bool CheckTimelineOverlap();
+	
 	/** Blueprint event called when a timeline switch occurs, for triggering VFX, SFX, and animations. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimelineSwitched(uint8 NewTimelineID);
+	
+	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
+	void OnAntiPhasingTriggered();
 
 	/** Cosmetic event called on all clients (Owner and Proxies) to trigger VFX/SFX. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimelineChangedCosmetic(uint8 NewTimelineID);
-	
-	// ========================================================================
-	// INTERACTION & PHYSICS
-	// ========================================================================
 
+	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
+	UFUNCTION(Server, Reliable)
+	void Server_RequestOtherPlayerSwitch();
+#pragma endregion
+
+#pragma region Interaction System
 	/** Initiates the grab logic. */
 	void AttemptGrab();
 	
@@ -130,63 +143,12 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_Release();
 
-	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
-	UFUNCTION(Server, Reliable)
-	void Server_RequestOtherPlayerSwitch();
-
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	float ReachDistance = 300.0f;
 	
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	float HoldDistance = 200.0f;
-	
-	//!!!Check if UPROPERTY is needed!!!
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
-	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
-	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
-	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
-	
-public:
-	// ========================================================================
-	// PUBLIC NETWORK API
-	// ========================================================================
-	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
-	UFUNCTION(Client, Reliable)
-	void Client_ForcedTimelineChange(uint8 NewTimelineID);
 
-	// ========================================================================
-	// ENGINE OVERRIDES
-	// ========================================================================
-	/** Called every frame. */
-	virtual void Tick(float DeltaTime) override;
-
-	/** Called to bind functionality to input. */
-	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-	
-private:
-	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
-	FTimerHandle PlayerStateBindTimer;
-	
-	// ========================================================================
-	// INTERNAL HELPERS
-	// ========================================================================
-	
-	/** Finds and caches the other player character in the world. */
-	void CacheOtherPlayerCharacter();
-	
-	/** Handles symmetrical player-vs-player collision logic. */
-	void UpdatePlayerCollision(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
-	
-	/** Configures physics settings for remote players (Simulated Proxies) to handle stability vs dragging. */
-	void ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject);
-
-	/** Handles asymmetrical visibility logic for rendering the other player. */
-	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
-
-	
-	
 	/** The component currently being held. Replicated to handle client-side physics state. */
 	UPROPERTY(ReplicatedUsing = OnRep_GrabbedComponent)
 	TObjectPtr<UPrimitiveComponent> GrabbedComponent;
@@ -211,4 +173,34 @@ private:
 	/** Stores the original collision channel of the grabbed object to restore it upon release. */
 	UPROPERTY(Replicated)
 	TEnumAsByte<ECollisionChannel> GrabbedMeshOriginalCollision;
+#pragma endregion
+
+#pragma region Player Management
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
+	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
+	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedMyPlayerState;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
+	TWeakObjectPtr<class AChronoSwitchPlayerState> CachedOtherPlayerState;
+
+	/** Finds and caches the other player character in the world. */
+	void CacheOtherPlayerCharacter();
+	
+	/** Handles symmetrical player-vs-player collision logic. */
+	void UpdatePlayerCollision(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
+	
+	/** Configures physics settings for remote players (Simulated Proxies) to handle stability vs dragging. */
+	void ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject);
+
+	/** Handles asymmetrical visibility logic for rendering the other player. */
+	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
+#pragma endregion
+
+private:
+#pragma region Internal State
+	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
+	FTimerHandle PlayerStateBindTimer;
+#pragma endregion
 };

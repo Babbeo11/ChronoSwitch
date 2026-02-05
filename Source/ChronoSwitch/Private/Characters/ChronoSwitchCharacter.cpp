@@ -8,13 +8,13 @@
 #include "EngineUtils.h"
 #include "Game/ChronoSwitchGameState.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "PhysicsEngine/BodyInstance.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/EngineTypes.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Interfaces/Interactable.h"
 #include "Net/UnrealNetwork.h"
 
+#pragma region Lifecycle
 
 AChronoSwitchCharacter::AChronoSwitchCharacter()
 {
@@ -66,14 +66,6 @@ void AChronoSwitchCharacter::BeginPlay()
 	}
 }
 
-void AChronoSwitchCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedComponent);
-	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedMeshOriginalCollision);
-	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedRelativeRotation);
-}
-
 void AChronoSwitchCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -110,6 +102,18 @@ void AChronoSwitchCharacter::Tick(float DeltaTime)
 	// Update held object transform (Kinematic).
 	UpdateHeldObjectTransform(DeltaTime);
 }
+
+void AChronoSwitchCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedComponent);
+	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedMeshOriginalCollision);
+	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedRelativeRotation);
+}
+
+#pragma endregion
+
+#pragma region Input
 
 void AChronoSwitchCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -214,6 +218,10 @@ void AChronoSwitchCharacter::Interact()
 	// This calls the Server RPC which performs its own validation trace.
 	AttemptGrab();
 }
+
+#pragma endregion
+
+#pragma region Interaction System
 
 void AChronoSwitchCharacter::AttemptGrab()
 {
@@ -354,6 +362,113 @@ void AChronoSwitchCharacter::OnRep_GrabbedComponent(UPrimitiveComponent* OldComp
 	}
 }
 
+void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
+{
+	// Kinematic update for held object to ensure smoothness on Server and Client.
+	if (GrabbedComponent && (HasAuthority() || IsLocallyControlled()))
+	{
+		FVector CameraLoc;
+		FRotator CameraRot;
+		GetActorEyesViewPoint(CameraLoc, CameraRot);
+		
+		const FVector IdealTargetLocation = CameraLoc + CameraRot.Vector() * HoldDistance;
+		
+		// Interpolate for smooth movement and weight.
+		const FVector CurrentLoc = GrabbedComponent->GetComponentLocation();
+		const FVector TargetLocation = FMath::VInterpTo(CurrentLoc, IdealTargetLocation, DeltaTime, 20.0f);
+		
+		// Apply Yaw offset to Camera Yaw. Keep Pitch and Roll zero to keep the object upright.
+		const FRotator TargetRotation = FRotator(0.0f, CameraRot.Yaw + GrabbedRelativeRotation.Yaw, 0.0f);
+
+		// Allow lifting the other player by ignoring collision if they are standing on the object.
+		if (CachedOtherPlayerCharacter.IsValid())
+		{
+			bool bShouldIgnore = (CachedOtherPlayerCharacter->GetMovementBase() == GrabbedComponent);
+
+			// Enforce timeline isolation manually since PhysicsBody collides with everything.
+			if (CachedOtherPlayerState.IsValid() && CachedMyPlayerState.IsValid())
+			{
+				if (CachedOtherPlayerState->GetTimelineID() != CachedMyPlayerState->GetTimelineID())
+				{
+					bShouldIgnore = true;
+				}
+			}
+			
+			GrabbedComponent->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), bShouldIgnore);
+		}
+
+		// Perform kinematic move with sweep.
+		FHitResult Hit;
+		GrabbedComponent->SetWorldLocationAndRotation(TargetLocation, TargetRotation, true, &Hit);
+
+		// Handle sliding along walls/floors.
+		if (Hit.bBlockingHit)
+		{
+			const FVector BlockedLoc = GrabbedComponent->GetComponentLocation();
+			const FVector DesiredDelta = TargetLocation - BlockedLoc;
+
+			FVector SlideDelta = FVector::VectorPlaneProject(DesiredDelta, Hit.ImpactNormal);
+
+			// Apply friction if dragging on ground.
+			if (Hit.ImpactNormal.Z > 0.7f)
+			{
+				const FVector TargetSlidePos = BlockedLoc + SlideDelta;
+				const FVector NewPos = FMath::VInterpTo(BlockedLoc, TargetSlidePos, DeltaTime, 15.0f);
+				SlideDelta = NewPos - BlockedLoc;
+			}
+
+			if (!SlideDelta.IsNearlyZero(0.1f))
+			{
+				GrabbedComponent->SetWorldLocationAndRotation(BlockedLoc + SlideDelta, TargetRotation, true, &Hit);
+			}
+		}
+	}
+}
+
+/** Performs a box trace from the camera to find an interactable object. */
+bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, const EDrawDebugTrace::Type Type)
+{
+	// Use GetActorEyesViewPoint for consistent start location and rotation on both Client and Server.
+	// Accessing FirstPersonCameraComponent directly on the Server can be unreliable if the component isn't updated.
+	FVector Start;
+	FRotator Rot;
+	GetActorEyesViewPoint(Start, Rot);
+
+	const FVector End = Start + Rot.Vector() * DrawDistance;
+	const FVector HalfSize = FVector(10.f, 10.f, 10.f);
+	TArray<AActor*> ActorsToIgnore;
+	ActorsToIgnore.Add(this);
+	
+	// Get the PlayerState directly from the character to determine the correct trace channel.
+	const AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>();
+	if (!PS)
+	{
+		return false;
+	}
+	
+	// Select the correct Object Channel based on the player's current timeline.
+	// ECC_GameTraceChannel3 is for Past Objects, ECC_GameTraceChannel4 is for Future Objects.
+	const ECollisionChannel TargetChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel3 : ECC_GameTraceChannel4;
+	// Also include the Player Channel for the current timeline, in case actors are using that channel.
+	const ECollisionChannel PlayerChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
+
+	// We must use an Object Trace because the Timeline Actors are set to specific Object Types (3/4)
+	// and might ignore standard visibility traces.
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(TargetChannel));
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(PlayerChannel));
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_PhysicsBody)); // Also include standard physics objects
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldDynamic)); // Include dynamic objects (props, movers)
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic)); // Include static objects (buttons, walls for occlusion)
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn)); // Include pawns (other players/NPCs)
+	
+	return UKismetSystemLibrary::BoxTraceSingleForObjects(GetWorld(), Start, End, HalfSize, Rot, ObjectTypes, false, ActorsToIgnore , Type, OutHit , true);
+}
+
+#pragma endregion
+
+#pragma region Timeline System
+
 void AChronoSwitchCharacter::ExecuteTimeSwitchLogic()
 {
 	AChronoSwitchPlayerState* MyPS = GetPlayerState<AChronoSwitchPlayerState>();
@@ -361,6 +476,13 @@ void AChronoSwitchCharacter::ExecuteTimeSwitchLogic()
 
 	if (!MyPS || !GameState)
 	{
+		return;
+	}
+
+	// Anti-Phasing: Prevent switch if the destination is blocked.
+	if (CheckTimelineOverlap())
+	{
+		OnAntiPhasingTriggered();
 		return;
 	}
 
@@ -420,6 +542,92 @@ void AChronoSwitchCharacter::Client_ForcedTimelineChange_Implementation(uint8 Ne
 	// Force immediate state update and flush movement buffer.
 	HandleTimelineUpdate(NewTimelineID);
 }
+
+bool AChronoSwitchCharacter::CheckTimelineOverlap()
+{
+	if (!GetCapsuleComponent()) return false;
+	
+	const AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>();
+	if (!PS) return false;
+	
+	FCollisionShape CapsuleShape = GetCapsuleComponent()->GetCollisionShape();
+	
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+	
+	// Check the OPPOSITE timeline channel.
+	const ECollisionChannel ChannelToTest = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel2 : ECC_GameTraceChannel1;
+	
+	bool bIsBlocked = GetWorld()->OverlapBlockingTestByChannel(
+		GetActorLocation(), 
+		GetActorQuat(), 
+		ChannelToTest, 
+		CapsuleShape, 
+		QueryParams);	
+	
+	return bIsBlocked;
+	
+}
+
+/** Binds the UpdateCollisionChannel function to the PlayerState's OnTimelineIDChanged delegate. Retries if the PlayerState is not yet valid. */
+void AChronoSwitchCharacter::BindToPlayerState()
+{
+	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
+	{
+		// Bind our handler to the PlayerState's delegate.
+		PS->OnTimelineIDChanged.AddUObject(this, &AChronoSwitchCharacter::HandleTimelineUpdate);
+		
+		// Set the initial collision state WITHOUT triggering cosmetic effects.
+		UpdateCollisionChannel(PS->GetTimelineID());
+	}
+	else
+	{
+		GetWorldTimerManager().SetTimer(PlayerStateBindTimer, this, &AChronoSwitchCharacter::BindToPlayerState, 0.1f, false);
+	}
+}
+
+void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
+{
+	// This function is called by the delegate when a change occurs.
+	
+	UpdateCollisionChannel(NewTimelineID);
+
+	// Flush server moves to prevent rubber banding.
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		CMC->FlushServerMoves();
+	}
+
+	OnTimelineChangedCosmetic(NewTimelineID);
+	OnTimelineSwitched(NewTimelineID);
+}
+
+void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
+{
+	if (!GetCapsuleComponent()) return;
+	
+	ECollisionChannel NewTimelineChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
+	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
+
+	// Simulated Proxies manage their own collision in ConfigureSimulatedProxyPhysics.
+	if (GetLocalRole() == ROLE_SimulatedProxy) return;
+
+	// Configure Authority collision responses.
+	if (NewTimelineID == 0) // Past
+	{
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);  // Block Past Objects
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Ignore); // Ignore Future Objects
+	}
+	else // Future
+	{
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore); // Ignore Past Objects
+		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Block);  // Block Future Objects
+	}
+}
+
+#pragma endregion
+
+#pragma region Player Management
 
 /** Finds the other player character in the world and caches a weak pointer to it for optimization. */
 void AChronoSwitchCharacter::CacheOtherPlayerCharacter()
@@ -541,69 +749,6 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 	}
 }
 
-void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
-{
-	// Kinematic update for held object to ensure smoothness on Server and Client.
-	if (GrabbedComponent && (HasAuthority() || IsLocallyControlled()))
-	{
-		FVector CameraLoc;
-		FRotator CameraRot;
-		GetActorEyesViewPoint(CameraLoc, CameraRot);
-		
-		const FVector IdealTargetLocation = CameraLoc + CameraRot.Vector() * HoldDistance;
-		
-		// Interpolate for smooth movement and weight.
-		const FVector CurrentLoc = GrabbedComponent->GetComponentLocation();
-		const FVector TargetLocation = FMath::VInterpTo(CurrentLoc, IdealTargetLocation, DeltaTime, 20.0f);
-		
-		// Apply Yaw offset to Camera Yaw. Keep Pitch and Roll zero to keep the object upright.
-		const FRotator TargetRotation = FRotator(0.0f, CameraRot.Yaw + GrabbedRelativeRotation.Yaw, 0.0f);
-
-		// Allow lifting the other player by ignoring collision if they are standing on the object.
-		if (CachedOtherPlayerCharacter.IsValid())
-		{
-			bool bShouldIgnore = (CachedOtherPlayerCharacter->GetMovementBase() == GrabbedComponent);
-
-			// Enforce timeline isolation manually since PhysicsBody collides with everything.
-			if (CachedOtherPlayerState.IsValid() && CachedMyPlayerState.IsValid())
-			{
-				if (CachedOtherPlayerState->GetTimelineID() != CachedMyPlayerState->GetTimelineID())
-				{
-					bShouldIgnore = true;
-				}
-			}
-			
-			GrabbedComponent->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), bShouldIgnore);
-		}
-
-		// Perform kinematic move with sweep.
-		FHitResult Hit;
-		GrabbedComponent->SetWorldLocationAndRotation(TargetLocation, TargetRotation, true, &Hit);
-
-		// Handle sliding along walls/floors.
-		if (Hit.bBlockingHit)
-		{
-			const FVector BlockedLoc = GrabbedComponent->GetComponentLocation();
-			const FVector DesiredDelta = TargetLocation - BlockedLoc;
-
-			FVector SlideDelta = FVector::VectorPlaneProject(DesiredDelta, Hit.ImpactNormal);
-
-			// Apply friction if dragging on ground.
-			if (Hit.ImpactNormal.Z > 0.7f)
-			{
-				const FVector TargetSlidePos = BlockedLoc + SlideDelta;
-				const FVector NewPos = FMath::VInterpTo(BlockedLoc, TargetSlidePos, DeltaTime, 15.0f);
-				SlideDelta = NewPos - BlockedLoc;
-			}
-
-			if (!SlideDelta.IsNearlyZero(0.1f))
-			{
-				GrabbedComponent->SetWorldLocationAndRotation(BlockedLoc + SlideDelta, TargetRotation, true, &Hit);
-			}
-		}
-	}
-}
-
 /** Handles asymmetrical visibility of the other player. This logic only affects the local player's view. */
 void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS)
 {
@@ -629,98 +774,4 @@ void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* My
 	}
 }
 
-/** Binds the UpdateCollisionChannel function to the PlayerState's OnTimelineIDChanged delegate. Retries if the PlayerState is not yet valid. */
-void AChronoSwitchCharacter::BindToPlayerState()
-{
-	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
-	{
-		// Bind our handler to the PlayerState's delegate.
-		PS->OnTimelineIDChanged.AddUObject(this, &AChronoSwitchCharacter::HandleTimelineUpdate);
-		
-		// Set the initial collision state WITHOUT triggering cosmetic effects.
-		UpdateCollisionChannel(PS->GetTimelineID());
-	}
-	else
-	{
-		GetWorldTimerManager().SetTimer(PlayerStateBindTimer, this, &AChronoSwitchCharacter::BindToPlayerState, 0.1f, false);
-	}
-}
-
-void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
-{
-	// This function is called by the delegate when a change occurs.
-	
-	UpdateCollisionChannel(NewTimelineID);
-
-	// Flush server moves to prevent rubber banding.
-	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
-	{
-		CMC->FlushServerMoves();
-	}
-
-	OnTimelineChangedCosmetic(NewTimelineID);
-	OnTimelineSwitched(NewTimelineID);
-}
-
-void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
-{
-	if (!GetCapsuleComponent()) return;
-	
-	ECollisionChannel NewTimelineChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
-	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
-
-	// Simulated Proxies manage their own collision in ConfigureSimulatedProxyPhysics.
-	if (GetLocalRole() == ROLE_SimulatedProxy) return;
-
-	// Configure Authority collision responses.
-	if (NewTimelineID == 0) // Past
-	{
-		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);  // Block Past Objects
-		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Ignore); // Ignore Future Objects
-	}
-	else // Future
-	{
-		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore); // Ignore Past Objects
-		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Block);  // Block Future Objects
-	}
-}
-
-/** Performs a box trace from the camera to find an interactable object. */
-bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, const EDrawDebugTrace::Type Type)
-{
-	// Use GetActorEyesViewPoint for consistent start location and rotation on both Client and Server.
-	// Accessing FirstPersonCameraComponent directly on the Server can be unreliable if the component isn't updated.
-	FVector Start;
-	FRotator Rot;
-	GetActorEyesViewPoint(Start, Rot);
-
-	const FVector End = Start + Rot.Vector() * DrawDistance;
-	const FVector HalfSize = FVector(10.f, 10.f, 10.f);
-	TArray<AActor*> ActorsToIgnore;
-	ActorsToIgnore.Add(this);
-	
-	// Get the PlayerState directly from the character to determine the correct trace channel.
-	const AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>();
-	if (!PS)
-	{
-		return false;
-	}
-	
-	// Select the correct Object Channel based on the player's current timeline.
-	// ECC_GameTraceChannel3 is for Past Objects, ECC_GameTraceChannel4 is for Future Objects.
-	const ECollisionChannel TargetChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel3 : ECC_GameTraceChannel4;
-	// Also include the Player Channel for the current timeline, in case actors are using that channel.
-	const ECollisionChannel PlayerChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
-
-	// We must use an Object Trace because the Timeline Actors are set to specific Object Types (3/4)
-	// and might ignore standard visibility traces.
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(TargetChannel));
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(PlayerChannel));
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_PhysicsBody)); // Also include standard physics objects
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldDynamic)); // Include dynamic objects (props, movers)
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic)); // Include static objects (buttons, walls for occlusion)
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn)); // Include pawns (other players/NPCs)
-	
-	return UKismetSystemLibrary::BoxTraceSingleForObjects(GetWorld(), Start, End, HalfSize, Rot, ObjectTypes, false, ActorsToIgnore , Type, OutHit , true);
-}
+#pragma endregion
