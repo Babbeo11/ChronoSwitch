@@ -7,78 +7,80 @@
 #include "TimelineBaseActor.generated.h"
 
 /**
- * Defines how an actor exists across the two timelines.
+ * Defines the temporal existence of an actor.
  */
 UENUM(BlueprintType)
 enum class EActorTimeline : uint8
 {
 	PastOnly    UMETA(DisplayName = "Only in Past"),
 	FutureOnly  UMETA(DisplayName = "Only in Future"),
-	Both_Static UMETA(DisplayName = "Both Timeline (Static)"),
-	Both_Causal UMETA(DisplayName = "Both Timeline (Causal)"),
+	Both_Static UMETA(DisplayName = "Both Timelines (Static)"),
+	Both_Causal UMETA(DisplayName = "Both Timelines (Causal)"),
 };
 
 /**
- * The base class for all objects that react to timeline changes.
- * This actor manages two mesh components (Past and Future) and determines their
- * visibility and collision based on the local player's timeline state.
- * 
- * It implements the IInteractable interface to allow basic interaction.
-*/
+ * Base class for objects that exist within the dual-timeline mechanic.
+ * Manages visibility and collision for Past and Future meshes based on the local player's state.
+ */
 UCLASS(PrioritizeCategories = "Timeline")
 class CHRONOSWITCH_API ATimelineBaseActor : public AActor, public IInteractable
 {
 	GENERATED_BODY()
 
 public:
-	/** Sets default values for this actor's properties. */
 	ATimelineBaseActor();
-	
-	// --- IInteractable Interface ---
-	
+
+#pragma region IInteractable Interface
 	virtual void Interact_Implementation(ACharacter* Interactor) override;
-	virtual bool IsGrabbable_Implementation() override;
-	virtual void Release_Implementation() override;
+#pragma endregion
+
+#pragma region Interaction Hooks
+	/** Called when the actor is grabbed by a character. */
+	virtual void NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabber);
+
+	/** Called when the actor is released by a character. */
+	virtual void NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabber);
+#pragma endregion
 
 protected:
-	// --- Components ---
-
-	/** The mesh representing the object in the Past timeline. */
+#pragma region Components
+	/** Mesh visible in the Past timeline. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> PastMesh;
 	
-	/** The mesh representing the object in the Future timeline. */
+	/** Mesh visible in the Future timeline. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> FutureMesh;
 	
-	/** Listens for changes in the local player's timeline state. */
+	/** Component that listens for local player timeline changes. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
 	TObjectPtr<UTimelineObserverComponent> TimelineObserver;
-	
-	// --- Configuration ---
+#pragma endregion
 
-	/** Defines how this actor behaves across timelines (e.g., exists only in the past, or in both). */
+#pragma region Configuration
+	/** Specifies which timeline(s) this actor belongs to. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", meta = (DisplayPriority = "0"))
 	EActorTimeline ActorTimeline;
-	
-	// --- Engine Overrides ---
+#pragma endregion
 
-	/** Called when the game starts or when spawned. */
+#pragma region Engine Overrides
 	virtual void BeginPlay() override;
-	
-	/** Called in the editor when a property is changed. Used for visual feedback. */
 	virtual void OnConstruction(const FTransform& Transform) override;
+#pragma endregion
 
 private:
-	// --- Timeline Logic ---
-
-	/** Sets the permanent collision profiles for the meshes at the start of the game. */
+#pragma region Timeline Logic
+	/** Configures collision profiles based on the actor's timeline settings. */
 	void SetupCollisionProfiles();
+
+	/** Helper to apply specific collision settings to a mesh based on its timeline ID. */
+	void ConfigureMeshCollision(UStaticMeshComponent* Mesh, uint8 MeshTimelineID);
 	
-	/** Called by the TimelineObserver when the player's timeline or visor state changes. */
+	/** Handles updates from the TimelineObserver when the player switches timelines. */
 	UFUNCTION()
 	void HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool bIsVisorActive);
 
-	/** Updates the visibility of meshes in the editor for immediate visual feedback. */
+	/** Updates mesh visibility in the editor for WYSIWYG feedback. */
 	void UpdateEditorVisuals();
+#pragma endregion
 };

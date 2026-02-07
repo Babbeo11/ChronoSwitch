@@ -14,7 +14,7 @@ class UInteractable : public UInterface
 };
 
 /**
- * 
+ * Interface for actors that can be interacted with (e.g. Buttons, Levers).
  */
 class CHRONOSWITCH_API IInteractable
 {
@@ -24,10 +24,4 @@ class CHRONOSWITCH_API IInteractable
 public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
 	void Interact(ACharacter* Interactor);
-
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	bool IsGrabbable();
-
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	void Release();
 };

@@ -202,5 +202,11 @@ private:
 #pragma region Internal State
 	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
 	FTimerHandle PlayerStateBindTimer;
+
+	/** Tracks the last physics state applied to the proxy to avoid redundant updates. */
+	bool bLastProxyPhysicsState;
+	
+	/** Tracks the last timeline ID of the proxy to handle timeline switches efficiently. */
+	uint8 LastProxyTimelineID;
 #pragma endregion
 };
