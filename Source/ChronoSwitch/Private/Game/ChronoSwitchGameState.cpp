@@ -76,6 +76,22 @@ void AChronoSwitchGameState::PerformGlobalSwitch()
 	}
 }
 
+void AChronoSwitchGameState::SetGlobalVisorState(bool bNewState)
+{
+	// Iterates through all connected players and forces them to a specific visor state.
+	for (APlayerState* PS : PlayerArray)
+	{
+		if (AChronoSwitchPlayerState* ChronoPS = Cast<AChronoSwitchPlayerState>(PS))
+		{
+			// Only switch if they are not already in the target state.
+			if (ChronoPS->IsVisorActive() != bNewState)
+			{
+				ChronoPS->SetVisorActive(bNewState);
+			}
+		}
+	}
+}
+
 void AChronoSwitchGameState::SetGlobalTimeline(uint8 TargetID)
 {
 	// Iterates through all connected players and forces them to a specific timeline.
@@ -90,4 +106,22 @@ void AChronoSwitchGameState::SetGlobalTimeline(uint8 TargetID)
 			}
 		}
 	}
+}
+
+bool AChronoSwitchGameState::AreBothPlayersInTimeline(uint8 TimelineID) const
+{
+	// Iterates through all connected players to check their timeline.
+	for (APlayerState* PS : PlayerArray)
+	{
+		if (AChronoSwitchPlayerState* ChronoPS = Cast<AChronoSwitchPlayerState>(PS))
+		{
+			// If any player is NOT in the target timeline, return false.
+			if (ChronoPS->GetTimelineID() != TimelineID)
+			{
+				return false;
+			}
+		}
+	}
+	
+	return PlayerArray.Num() > 0;
 }

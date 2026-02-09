@@ -19,6 +19,7 @@ ATimelineBaseActor::ATimelineBaseActor()
 	
 	// Default to Past-only existence.
 	ActorTimeline = EActorTimeline::PastOnly;
+	bShowStaticGhost = false;
 }
 
 #pragma region Interaction
@@ -155,6 +156,12 @@ void ATimelineBaseActor::HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool
 		break;
 
 	case EActorTimeline::Both_Static:
+		// Visible in respective timeline.
+		// If bShowStaticGhost is true, also visible in other timeline if Visor is active.
+		bPastVisible = bPlayerIsInPast || (bShowStaticGhost && bIsVisorActive);
+		bFutureVisible = !bPlayerIsInPast || (bShowStaticGhost && bIsVisorActive);
+		break;
+
 	case EActorTimeline::Both_Causal:
 		// Always visible in the respective timeline.
 		bPastVisible = bPlayerIsInPast;

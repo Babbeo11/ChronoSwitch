@@ -61,6 +61,10 @@ protected:
 	/** Specifies which timeline(s) this actor belongs to. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline", meta = (DisplayPriority = "0"))
 	EActorTimeline ActorTimeline;
+
+	/** If true, allows seeing the mesh from the other timeline as a ghost when in Both_Static mode (requires Visor). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline")
+	bool bShowStaticGhost;
 #pragma endregion
 
 #pragma region Engine Overrides

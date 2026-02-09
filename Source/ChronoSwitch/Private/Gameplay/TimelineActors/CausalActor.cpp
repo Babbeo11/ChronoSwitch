@@ -15,7 +15,7 @@ ACausalActor::ACausalActor()
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 	
 	// High priority for replication as this is an interactive physics object.
-	NetPriority = 3.0f;
+	NetPriority = 5.0f;
 
 	// Force the actor timeline mode to exist in both timelines (Causal).
 	ActorTimeline = EActorTimeline::Both_Causal;

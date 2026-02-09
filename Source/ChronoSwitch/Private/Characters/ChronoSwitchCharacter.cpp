@@ -594,7 +594,21 @@ void AChronoSwitchCharacter::Server_RequestOtherPlayerSwitch_Implementation()
 
 void AChronoSwitchCharacter::Client_ForcedTimelineChange_Implementation(uint8 NewTimelineID)
 {
-	// Force immediate state update and flush movement buffer.
+	// Network Correction: Always flush server moves to prevent rubber banding when the server confirms a timeline change.
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		CMC->FlushServerMoves();
+	}
+
+	// If the local PlayerState already matches the NewTimelineID, it means we successfully predicted this change locally.
+	// In this case, HandleTimelineUpdate (and cosmetics) has already run via the OnTimelineIDChanged delegate.
+	// We skip running it again to avoid double cosmetics.
+	if (const AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
+	{
+		if (PS->GetTimelineID() == NewTimelineID) return;
+	}
+
+	// If we haven't processed this ID yet (e.g. Global Timer switch), perform the full update now.
 	HandleTimelineUpdate(NewTimelineID);
 }
 
@@ -644,6 +658,12 @@ void AChronoSwitchCharacter::BindToPlayerState()
 void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
 {
 	// This function is called by the delegate when a change occurs.
+	
+	// Check if we are already in the target timeline state.
+	// This prevents double execution of cosmetics when both the Server RPC (Client_ForcedTimelineChange)
+	// and the Replication (OnRep_TimelineID) trigger this function in the same frame/network update.
+	const ECollisionChannel TargetChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
+	if (GetCapsuleComponent() && GetCapsuleComponent()->GetCollisionObjectType() == TargetChannel) return;
 	
 	UpdateCollisionChannel(NewTimelineID);
 

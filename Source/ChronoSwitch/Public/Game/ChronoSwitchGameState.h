@@ -57,6 +57,13 @@ public:
 	/** Forces all players to switch to a specific timeline ID (0 or 1). */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Game Rules")
 	void SetGlobalTimeline(uint8 TargetID);
+	
+	/** Forces all players to set their visor state to a specific value. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Game Rules")
+	void SetGlobalVisorState(bool bNewState);
+	
+	UFUNCTION(BlueprintCallable, Category = "Game Rules")
+	bool AreBothPlayersInTimeline(uint8 TimelineID) const;
 
 protected:
 	virtual void BeginPlay() override;
