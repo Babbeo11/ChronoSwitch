@@ -43,9 +43,6 @@ The switch mechanic is replicated to handle both player-initiated actions and se
 - **State Validation:** The system verifies the `PlayerState` to avoid redundant cosmetic triggers if the local prediction already matches the server-authoritative state.
 
 
-
-![Switch Demo]([LINK_TO_YOUR_SWITCH_GIF])
-
 ---
 
 ## 💻 Technical Snippets
