@@ -15,7 +15,12 @@ To maximize performance, the world remains static while the **Character** handle
 - **Character-Centric Logic:** Instead of toggling world actors, the Character capsule updates its collision responses to specific Object Channels (`ECC_Past` / `ECC_Future`) in an $O(1)$ operation. This allows for seamless traversal of era-specific obstacles without heavy CPU overhead.
 - **Visual State:** A Material Parameter Collection (MPC) is updated via C++ to shift the global color palette (Blue for Past, Orange for Future) and drive environment shaders in real-time.
 
-
+<br>
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/8f649451-8333-4866-9d2e-c0242aea5f93" width="100%" />
+  <p><i><b>Fig 1. O(1) Timeline Switching:</b> The character capsule updates its collision response to custom Object Channels (ECC_Past/Future) instantly, allowing seamless traversal without the overhead of toggling world actors.</i></p>
+</div>
+<br>
 
 ### 2. Causal Actor System (Physics Synchronization)
 The `CausalActor` (inheriting from `TimelineBaseActor`) manages objects that exist across both timelines simultaneously.
@@ -23,7 +28,13 @@ The `CausalActor` (inheriting from `TimelineBaseActor`) manages objects that exi
 - **Transform Tracking:** Custom C++ logic ensures the "Future" mesh constantly aligns with the "Past" mesh's transform. 
 - **Physics Correction:** If pushed by physics, it uses corrective impulses to maintain sync. If "grabbed" by the player, it performs direct transform updates to prevent desynchronization between timelines.
 
-![Causality Demo]([LINK_TO_YOUR_CAUSALITY_GIF])
+<br>
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/16fb58b9-7914-48a6-8133-761c76f3d1b7" width="100%" />
+  <p><i><b>Fig 2. Causal Physics Sync:</b> The "Future" mesh actively tracks the authoritative "Past" transform using corrective impulses and interpolation, ensuring synchronization across timelines during physics interactions.</i></p>
+</div>
+<br>
+
 
 ### 3. Networking & Movement Correction
 The switch mechanic is replicated to handle both player-initiated actions and server-forced events (e.g., global timers).
