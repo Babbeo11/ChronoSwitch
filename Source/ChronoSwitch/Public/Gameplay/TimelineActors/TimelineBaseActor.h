@@ -32,6 +32,7 @@ public:
 
 #pragma region IInteractable Interface
 	virtual void Interact_Implementation(ACharacter* Interactor) override;
+	virtual FText GetInteractPrompt_Implementation() override;
 #pragma endregion
 
 #pragma region Interaction Hooks

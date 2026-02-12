@@ -16,7 +16,8 @@ public:
 	ACrossSwitchButton();
 	
 	virtual void Interact_Implementation(ACharacter* Interactor) override;
-
+	virtual FText GetInteractPrompt_Implementation() override;
+	
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;

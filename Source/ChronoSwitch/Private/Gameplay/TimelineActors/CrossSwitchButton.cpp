@@ -29,7 +29,7 @@ void ACrossSwitchButton::Interact_Implementation(ACharacter* Interactor)
 	{
 		return;
 	}
-
+	
 	// Find the player character who is NOT the one who interacted with the button.
 	for (TActorIterator<AChronoSwitchCharacter> It(GetWorld()); It; ++It)
 	{
@@ -46,4 +46,13 @@ void ACrossSwitchButton::Interact_Implementation(ACharacter* Interactor)
 			break; // Found and switched, no need to continue looping.
 		}
 	}
+}
+
+FText ACrossSwitchButton::GetInteractPrompt_Implementation()
+{
+	if (!HasAuthority())
+	{
+		return FText::FromString("(TEST) HAS NOT AUTHORITY CALLED");
+	}
+	return FText::FromString("Press F to activate");
 }

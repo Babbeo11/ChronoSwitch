@@ -29,6 +29,12 @@ void ATimelineBaseActor::Interact_Implementation(ACharacter* Interactor)
 	// Override in derived classes.
 }
 
+FText ATimelineBaseActor::GetInteractPrompt_Implementation()
+{
+	// Override in derived classes
+	return FText();
+}
+
 void ATimelineBaseActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabber)
 {
 	// Override in derived classes.

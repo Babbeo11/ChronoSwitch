@@ -104,6 +104,13 @@ void ACausalActor::Interact_Implementation(ACharacter* Interactor)
 	// Base implementation is empty.
 }
 
+FText ACausalActor::GetInteractPrompt_Implementation()
+{
+	if (IsHeld())
+		return FText::FromString("Press F to Release");
+	return FText::FromString("Press F to Grab");
+}
+
 bool ACausalActor::CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const
 {
 	// Enforce mutual exclusion: if any part is held, nothing else can be grabbed.
