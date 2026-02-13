@@ -506,49 +506,60 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 
 void AChronoSwitchCharacter::OnTickSenseInteractable()
 {
-	// To Do: Upgrade logic to avoid unnecessarily updating text and visibility of the widget.
-	//		  when grabbing or when sensing null
-	// Bug: The prompt remain visible when you look at the object and another player grabs it.
-	//		It remains until the object goes out of the line trace.
 	if (!IsLocallyControlled())
-	{
 		return;
-	}
+	
+	AActor* NewSensedActor = nullptr;
+	
+	// Priority: Checks if player is holding an object
 	if (GrabbedComponent)
 	{
-		FText Text = IInteractable::Execute_GetInteractPrompt(GrabbedComponent->GetOwner());
-		InteractWidget->SetPromptText(Text);
-		InteractWidget->SetVisibility(ESlateVisibility::Visible);
+		NewSensedActor = GrabbedComponent->GetOwner();
+	}
+	else
+	{
+		FHitResult HitResult;
+		if (BoxTraceFront(HitResult))
+		{
+			NewSensedActor = ValidateInteractable(HitResult.GetActor());
+		}
+	}
+	
+	// Checks if the SensedActor changed
+	if (NewSensedActor == SensedActor)
+		return;
+	
+	SensedActor = NewSensedActor;
+	UpdateInteractWidget();
+}
+
+AActor* AChronoSwitchCharacter::ValidateInteractable(AActor* HitActor)
+{
+	if (!HitActor)
+		return nullptr;
+	if (!HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		return nullptr;
+	
+	// Checks if actor is grabbed
+	if (ACausalActor* temp = Cast<ACausalActor>(HitActor))
+	{
+		if (temp->IsHeld())
+			return nullptr;
+	}
+	return HitActor;
+}
+
+void AChronoSwitchCharacter::UpdateInteractWidget()
+{
+	if (!SensedActor)
+	{
+		InteractWidget->SetVisibility(ESlateVisibility::Hidden);
 		return;
 	}
-	FHitResult HitResult;
-	if (BoxTraceFront(HitResult))
-	{
-		AActor* HitActor = HitResult.GetActor();
-		
-		if (HitActor == SensedActor || !HitActor)
-		{
-			return;
-		}
-		
-		// This if branch is temporary and must be substituted with a better implementation
-		if (ACausalActor* temp = Cast<ACausalActor>(HitActor))
-		{
-			if (temp->IsHeld())
-				return;
-		}
-		
-		if (HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
-		{
-			SensedActor = HitActor;
-			FText Text = IInteractable::Execute_GetInteractPrompt(HitActor);
-			InteractWidget->SetPromptText(Text);
-			InteractWidget->SetVisibility(ESlateVisibility::Visible);
-			return;
-		}
-	}
-	SensedActor = nullptr;
-	InteractWidget->SetVisibility(ESlateVisibility::Hidden);
+	// Only sets Visibility and Text if SensedActor is valid and has changed
+	FText Text = IInteractable::Execute_GetInteractPrompt(SensedActor);
+	InteractWidget->SetPromptText(Text);
+	InteractWidget->SetVisibility(ESlateVisibility::Visible);
 }
 
 /** Performs a box trace from the camera to find an interactable object. */

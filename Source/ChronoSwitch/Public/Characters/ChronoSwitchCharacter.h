@@ -189,10 +189,12 @@ protected:
 	/** Stores pointer to actor in front of the player. */
 	UPROPERTY()
 	AActor* SensedActor;
-	UPROPERTY()
-	AActor* LastSensedActor;
 	/** Checks for interactable objects in front of the player. */
 	void OnTickSenseInteractable();
+	/** Validates new traced candidate*/
+	AActor* ValidateInteractable(AActor* HitActor);
+	/** Sets visibility and text values only on SensedActor change*/
+	void UpdateInteractWidget();
 	/** Performs a trace from the camera to find interactable objects in the world. */
 	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
 #pragma endregion
