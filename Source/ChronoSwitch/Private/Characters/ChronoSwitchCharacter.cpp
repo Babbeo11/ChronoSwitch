@@ -506,8 +506,10 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 
 void AChronoSwitchCharacter::OnTickSenseInteractable()
 {
-	// To Do: Upgrade logic to avoid unnecessarily updating text and visibility of the widget
-	// when grabbing or when sensing null
+	// To Do: Upgrade logic to avoid unnecessarily updating text and visibility of the widget.
+	//		  when grabbing or when sensing null
+	// Bug: The prompt remain visible when you look at the object and another player grabs it.
+	//		It remains until the object goes out of the line trace.
 	if (!IsLocallyControlled())
 	{
 		return;
@@ -524,18 +526,19 @@ void AChronoSwitchCharacter::OnTickSenseInteractable()
 	{
 		AActor* HitActor = HitResult.GetActor();
 		
-		if (HitActor == SensedActor)
+		if (HitActor == SensedActor || !HitActor)
 		{
 			return;
 		}
 		
 		// This if branch is temporary and must be substituted with a better implementation
-		if (Cast<ACausalActor>(HitActor)->IsHeld())
+		if (ACausalActor* temp = Cast<ACausalActor>(HitActor))
 		{
-			return;
+			if (temp->IsHeld())
+				return;
 		}
 		
-		if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		if (HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
 		{
 			SensedActor = HitActor;
 			FText Text = IInteractable::Execute_GetInteractPrompt(HitActor);
