@@ -88,12 +88,17 @@ protected:
 	UFUNCTION(Server, Reliable, WithValidation)
 	void Server_SetVisorActive(bool bNewState);
 
-private:
-	// --- Internal Helpers ---
+	/** Multicast RPC to broadcast timeline changes immediately to all clients, bypassing replication delay. */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_TimelineChanged(uint8 NewID);
 
-	/** Internal helper to update the local state and broadcast the change. */
+public:
+	// --- Helpers (Exposed for RPCs) ---
+
+	/** Updates the local state and broadcasts the change. Used by Client RPCs to sync immediately. */
 	void NotifyTimelineChanged(uint8 NewID);
 	
+private:
 	/** Internal helper to update the local state and broadcast the change. */
 	void NotifyVisorStateChanged(bool bNewState);
 };

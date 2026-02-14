@@ -52,6 +52,8 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 	bLastProxyPhysicsState = false;
 	HeldObjectPos = FVector::ZeroVector;
 	LastProxyTimelineID = 255; // Invalid ID to force initial update
+	CurrentTimelineBlend = 0.0f;
+	CurrentVisibilityBlend = 0.0f;
 }
 
 void AChronoSwitchCharacter::BeginPlay()
@@ -115,7 +117,7 @@ void AChronoSwitchCharacter::Tick(float DeltaTime)
 	if (CachedMyPlayerState.IsValid() && CachedOtherPlayerState.IsValid())
 	{
 		UpdatePlayerCollision(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get());
-		UpdatePlayerVisibility(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get());
+		UpdatePlayerVisibility(CachedMyPlayerState.Get(), CachedOtherPlayerState.Get(), DeltaTime);
 	}
 	
 	// Update the held object's position and rotation.
@@ -587,7 +589,7 @@ bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawD
 
 	// Use Object Trace to detect specific timeline objects.
 	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Reserve(6); // Optimization: Prevent memory reallocations
+	ObjectTypes.Reserve(6); // Prevent memory reallocations.
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(TargetChannel));
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(PlayerChannel));
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_PhysicsBody)); // Also include standard physics objects
@@ -595,8 +597,6 @@ bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawD
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic)); // Include static objects (buttons, walls for occlusion)
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn)); // Include pawns (other players/NPCs)
 	
-	// Used LineTrace instead of BoxTrace
-	// return UKismetSystemLibrary::BoxTraceSingleForObjects(GetWorld(), Start, End, HalfSize, Rot, ObjectTypes, false, ActorsToIgnore , Type, OutHit , true);
 	return UKismetSystemLibrary::LineTraceSingleForObjects(GetWorld(), Start, End, ObjectTypes, false, ActorsToIgnore, Type, OutHit, true, FLinearColor::Red, FLinearColor::Green, 1.f);
 }
 
@@ -678,16 +678,18 @@ void AChronoSwitchCharacter::Client_ForcedTimelineChange_Implementation(uint8 Ne
 		CMC->FlushServerMoves();
 	}
 
-	// If the local PlayerState already matches the NewTimelineID, it means we successfully predicted this change locally.
-	// In this case, HandleTimelineUpdate (and cosmetics) has already run via the OnTimelineIDChanged delegate.
-	// We skip running it again to avoid double cosmetics.
-	if (const AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
+	// Update the PlayerState immediately so that polling logic (like UpdatePlayerVisibility in Tick)
+	// sees the new state this frame, instead of waiting for the OnRep packet.
+	if (AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>())
 	{
-		if (PS->GetTimelineID() == NewTimelineID) return;
+		// This will update TimelineID and broadcast OnTimelineIDChanged, triggering HandleTimelineUpdate.
+		PS->NotifyTimelineChanged(NewTimelineID);
 	}
-
-	// If we haven't processed this ID yet (e.g. Global Timer switch), perform the full update now.
-	HandleTimelineUpdate(NewTimelineID);
+	else
+	{
+		// Fallback: If no PlayerState, just update the character locally.
+		HandleTimelineUpdate(NewTimelineID);
+	}
 }
 
 bool AChronoSwitchCharacter::CheckTimelineOverlap()
@@ -838,7 +840,7 @@ void AChronoSwitchCharacter::UpdatePlayerCollision(AChronoSwitchPlayerState* MyP
 			}
 
 			// Perform local detection since replicated movement base might lag.
-			// Optimization: Only trace if the other player is close enough to potentially be on our held object.
+			// Only trace if the other player is close enough to potentially be on our held object.
 			const float DistSq = FVector::DistSquared(GetActorLocation(), OtherChar->GetActorLocation());
 			if (!bIsOnPhysicsObject && GrabbedComponent && DistSq < FMath::Square(HoldDistance + 150.0f))
 			{
@@ -880,7 +882,7 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 
 	if (!ProxyCMC || !ProxyCapsule) return;
 
-	// Optimization: Avoid redundant physics state updates.
+	// Avoid redundant physics state updates.
 	const uint8 CurrentProxyTimelineID = ProxyPS->GetTimelineID();
 	if (bIsOnPhysicsObject == bLastProxyPhysicsState && CurrentProxyTimelineID == LastProxyTimelineID)
 	{
@@ -943,7 +945,7 @@ void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharact
 }
 
 /** Handles asymmetrical visibility of the other player. This logic only affects the local player's view. */
-void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS)
+void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS, float DeltaTime)
 {
 	// This logic only needs to run on the locally controlled character.
 	if (!IsLocallyControlled() || !CachedOtherPlayerCharacter.IsValid())
@@ -961,8 +963,36 @@ void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* My
 		// Visible if in same timeline OR if visor is active (Ghost).
 		const bool bShouldOtherBeVisibleAsGhost = !bAreInSameTimeline && bIsVisorActive;
 		const bool bShouldOtherBeVisible = bAreInSameTimeline || bShouldOtherBeVisibleAsGhost;
-		OtherPlayerMesh->SetHiddenInGame(!bShouldOtherBeVisible);
-		// A call to update the ghost material effect on the OtherPlayerMesh would go here.
+		
+		// We removed the immediate SetHiddenInGame here to allow the material transition below to handle visibility gradually.
+		
+		// Update Material Parameter: 1.0 if in same timeline, 0.0 if different.
+		// We check slot 0 (usually the body). Ensure your material has a Scalar Parameter named "TimelineBlend".
+		if (OtherPlayerMesh->GetNumMaterials() > 0)
+		{
+			UMaterialInstanceDynamic* BodyMID = Cast<UMaterialInstanceDynamic>(OtherPlayerMesh->GetMaterial(0));
+			if (!BodyMID)
+			{
+				BodyMID = OtherPlayerMesh->CreateAndSetMaterialInstanceDynamic(0);
+			}
+			
+			if (BodyMID)
+			{
+				const float TargetBlend = bAreInSameTimeline ? 1.0f : 0.0f;
+				// Interpolate smoothly towards the target value (Speed 4.0 gives a nice transition of ~1.0s).
+				CurrentTimelineBlend = FMath::FInterpTo(CurrentTimelineBlend, TargetBlend, DeltaTime, 4.0f);
+				BodyMID->SetScalarParameterValue(FName("MaterialState"), CurrentTimelineBlend);
+
+				// Update Visibility Parameter: 0.0 if Visible, 1.0 if Invisible.
+				const float TargetVisibility = bShouldOtherBeVisible ? 0.0f : 1.0f;
+				CurrentVisibilityBlend = FMath::FInterpTo(CurrentVisibilityBlend, TargetVisibility, DeltaTime, 4.0f);
+				BodyMID->SetScalarParameterValue(FName("FullVanish"), CurrentVisibilityBlend);
+
+				// Completely hide the mesh only when fully dissolved (>= 0.99) to save rendering cost.
+				// It will automatically unhide when the value drops below 0.99.
+				OtherPlayerMesh->SetHiddenInGame(CurrentVisibilityBlend >= 0.99f);
+			}
+		}
 	}
 }
 
