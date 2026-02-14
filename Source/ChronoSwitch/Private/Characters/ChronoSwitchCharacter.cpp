@@ -207,7 +207,7 @@ void AChronoSwitchCharacter::Interact()
 
 	// Priority 2: Interact with world objects (Buttons, Levers).
 	FHitResult HitResult;
-	if (BoxTraceFront(HitResult))
+	if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
 	{
 		AActor* HitActor = HitResult.GetActor();
 		if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
@@ -244,7 +244,7 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 	FHitResult HitResult;
 	
 	// Trace against the correct Timeline channel.
-	if (BoxTraceFront(HitResult, ReachDistance))
+	if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
 	{
 		// Validate CausalActor specific logic (e.g., prevent grabbing Future if Past is held).
 		if (ACausalActor* CausalActor = Cast<ACausalActor>(HitResult.GetActor()))
