@@ -62,14 +62,15 @@ void AChronoSwitchPlayerState::SetTimelineID(uint8 NewID)
 	{
 		NotifyTimelineChanged(NewID);
 
-		// Network Optimization: Unified Rubber Banding Fix.
-		// Whenever the server changes the timeline (whether via Global Timer, Personal Input, or Cross Switch),
-		// we explicitly tell the owning client to update immediately via a Client RPC.
+		// Explicitly tell the owning client to update immediately via a Client RPC.
 		// This flushes the movement prediction buffer, preventing the client from "snapping back" to the old timeline.
 		if (AChronoSwitchCharacter* ChronoChar = Cast<AChronoSwitchCharacter>(GetPawn()))
 		{
 			ChronoChar->Client_ForcedTimelineChange(NewID);
 		}
+
+		// Broadcast to all clients immediately to ensure observers see the material change instantly.
+		Multicast_TimelineChanged(NewID);
 	}
 }
 
@@ -83,6 +84,12 @@ void AChronoSwitchPlayerState::SetVisorActive(bool bNewState)
 	}
 }
 
+void AChronoSwitchPlayerState::Multicast_TimelineChanged_Implementation(uint8 NewID)
+{
+	// Update local state on all clients immediately.
+	// If this client is the owner (who predicted), NotifyTimelineChanged handles the redundancy safely.
+	NotifyTimelineChanged(NewID);
+}
 
 
 void AChronoSwitchPlayerState::NotifyVisorStateChanged(bool bNewState)

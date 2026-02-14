@@ -6,6 +6,7 @@
 #include "Interfaces/Interactable.h"
 #include "TimelineBaseActor.generated.h"
 
+
 /**
  * Defines the temporal existence of an actor.
  */
@@ -29,6 +30,7 @@ class CHRONOSWITCH_API ATimelineBaseActor : public AActor, public IInteractable
 
 public:
 	ATimelineBaseActor();
+
 
 #pragma region IInteractable Interface
 	virtual void Interact_Implementation(ACharacter* Interactor) override;
@@ -66,6 +68,11 @@ protected:
 	/** If true, allows seeing the mesh from the other timeline as a ghost when in Both_Static mode (requires Visor). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline")
 	bool bShowStaticGhost;
+
+	/** Time in seconds to wait before hiding the mesh of the previous timeline. Useful for dissolve effects. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Timeline")
+	float TransitionDuration;
+	
 #pragma endregion
 
 #pragma region Engine Overrides
@@ -87,5 +94,12 @@ private:
 
 	/** Updates mesh visibility in the editor for WYSIWYG feedback. */
 	void UpdateEditorVisuals();
+	
+	/** Called by the timer to finalize the visibility state (hide the old mesh). */
+	void FinalizeTimelineTransition(bool bShowPast, bool bShowFuture);
+
+	/** Handle for the transition timer. */
+	FTimerHandle TransitionTimerHandle;
+
 #pragma endregion
 };

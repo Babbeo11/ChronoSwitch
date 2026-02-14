@@ -20,6 +20,7 @@ ATimelineBaseActor::ATimelineBaseActor()
 	// Default to Past-only existence.
 	ActorTimeline = EActorTimeline::PastOnly;
 	bShowStaticGhost = false;
+	TransitionDuration = 0.7f; // Default transition time
 }
 
 #pragma region Interaction
@@ -175,8 +176,47 @@ void ATimelineBaseActor::HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool
 		break;
 	}
 
-	if (PastMesh) PastMesh->SetHiddenInGame(!bPastVisible);
-	if (FutureMesh) FutureMesh->SetHiddenInGame(!bFutureVisible);
+	// --- Visual Transition ---
+	
+	// Immediate: Show meshes that need to be visible (start transition IN).
+	if (ActorTimeline != EActorTimeline::FutureOnly)
+	{
+		if (bPastVisible && PastMesh) PastMesh->SetHiddenInGame(false);
+	}
+	if (ActorTimeline != EActorTimeline::PastOnly)
+	{
+		if (bFutureVisible && FutureMesh) FutureMesh->SetHiddenInGame(false);
+	}
+
+	// Delayed: Hide meshes that need to be hidden (wait for transition OUT).
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(TransitionTimerHandle);
+
+		if (TransitionDuration > 0.0f)
+		{
+			FTimerDelegate TimerDel;
+			TimerDel.BindUObject(this, &ATimelineBaseActor::FinalizeTimelineTransition, bPastVisible, bFutureVisible);
+			GetWorld()->GetTimerManager().SetTimer(TransitionTimerHandle, TimerDel, TransitionDuration, false);
+		}
+		else
+		{
+			FinalizeTimelineTransition(bPastVisible, bFutureVisible);
+		}
+	}
 }
+
+void ATimelineBaseActor::FinalizeTimelineTransition(bool bShowPast, bool bShowFuture)
+{
+	if (ActorTimeline != EActorTimeline::FutureOnly)
+	{
+		if (PastMesh) PastMesh->SetHiddenInGame(!bShowPast);
+	}
+	if (ActorTimeline != EActorTimeline::PastOnly)
+	{
+		if (FutureMesh) FutureMesh->SetHiddenInGame(!bShowFuture);
+	}
+}
+
 
 #pragma endregion

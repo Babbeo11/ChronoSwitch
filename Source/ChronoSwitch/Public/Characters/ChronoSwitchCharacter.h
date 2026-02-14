@@ -219,7 +219,7 @@ protected:
 	void ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject);
 
 	/** Handles asymmetrical visibility logic for rendering the other player. */
-	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
+	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS, float DeltaTime);
 #pragma endregion
 
 private:
@@ -232,5 +232,11 @@ private:
 	
 	/** Tracks the last timeline ID of the proxy to handle timeline switches efficiently. */
 	uint8 LastProxyTimelineID;
+
+	/** Current blend value for the timeline material transition (0.0 to 1.0). */
+	float CurrentTimelineBlend;
+
+	/** Current blend value for the visibility transition (0.0 = Visible, 1.0 = Invisible). */
+	float CurrentVisibilityBlend;
 #pragma endregion
 };
