@@ -26,6 +26,7 @@ public:
 	
 	// --- IInteractable Interface ---
 	virtual void Interact_Implementation(ACharacter* Interactor) override;
+	virtual FText GetInteractPrompt_Implementation() override;
 
 	// --- Interaction Hooks ---
 	virtual void NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabber) override;

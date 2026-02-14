@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
 #include "EngineUtils.h"
+#include "Blueprint/UserWidget.h"
 #include "Game/ChronoSwitchGameState.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Components/PrimitiveComponent.h"
@@ -15,6 +16,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Gameplay/TimelineActors/TimelineBaseActor.h"
 #include "Gameplay/TimelineActors/CausalActor.h"
+#include "UI/InteractPromptWidget.h"
 
 #pragma region Lifecycle
 
@@ -71,6 +73,19 @@ void AChronoSwitchCharacter::BeginPlay()
 			}
 		}
 	}
+	
+	// UI is not managed by Server
+	if (IsLocallyControlled() && InteractWidgetClass)
+	{
+		// Create Widget from blueprint class
+		InteractWidget = CreateWidget<UInteractPromptWidget>(GetWorld(), InteractWidgetClass);
+		
+		if (InteractWidget)
+		{
+			InteractWidget->AddToViewport();
+			InteractWidget->SetVisibility(ESlateVisibility::Hidden);
+		}
+	}
 }
 
 void AChronoSwitchCharacter::Tick(float DeltaTime)
@@ -105,6 +120,9 @@ void AChronoSwitchCharacter::Tick(float DeltaTime)
 	
 	// Update the held object's position and rotation.
 	UpdateHeldObjectTransform(DeltaTime);
+	
+	// Checks for interactable objects in front of the player
+	OnTickSenseInteractable();
 }
 
 void AChronoSwitchCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -206,16 +224,12 @@ void AChronoSwitchCharacter::Interact()
 	}
 
 	// Priority 2: Interact with world objects (Buttons, Levers).
-	FHitResult HitResult;
-	if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
+	
+	if (SensedActor)
 	{
-		AActor* HitActor = HitResult.GetActor();
-		if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
-		{
-			IInteractable::Execute_Interact(HitActor, this);
-		}
+		IInteractable::Execute_Interact(SensedActor, this);
 	}
-
+	
 	// Priority 3: Attempt to grab a physics object.
 	AttemptGrab();
 }
@@ -244,7 +258,7 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 	FHitResult HitResult;
 	
 	// Trace against the correct Timeline channel.
-	if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
+	if (BoxTraceFront(HitResult, ReachDistance))
 	{
 		// Validate CausalActor specific logic (e.g., prevent grabbing Future if Past is held).
 		if (ACausalActor* CausalActor = Cast<ACausalActor>(HitResult.GetActor()))
@@ -486,6 +500,68 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 	}
 }
 
+#pragma endregion
+
+#pragma region Interaction Sensing System
+
+void AChronoSwitchCharacter::OnTickSenseInteractable()
+{
+	if (!IsLocallyControlled())
+		return;
+	
+	AActor* NewSensedActor = nullptr;
+	
+	// Priority: Checks if player is holding an object
+	if (GrabbedComponent)
+	{
+		NewSensedActor = GrabbedComponent->GetOwner();
+	}
+	else
+	{
+		FHitResult HitResult;
+		if (BoxTraceFront(HitResult))
+		{
+			NewSensedActor = ValidateInteractable(HitResult.GetActor());
+		}
+	}
+	
+	// Checks if the SensedActor changed
+	if (NewSensedActor == SensedActor)
+		return;
+	
+	SensedActor = NewSensedActor;
+	UpdateInteractWidget();
+}
+
+AActor* AChronoSwitchCharacter::ValidateInteractable(AActor* HitActor)
+{
+	if (!HitActor)
+		return nullptr;
+	if (!HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
+		return nullptr;
+	
+	// Checks if actor is grabbed
+	if (ACausalActor* temp = Cast<ACausalActor>(HitActor))
+	{
+		if (temp->IsHeld())
+			return nullptr;
+	}
+	return HitActor;
+}
+
+void AChronoSwitchCharacter::UpdateInteractWidget()
+{
+	if (!SensedActor)
+	{
+		InteractWidget->SetVisibility(ESlateVisibility::Hidden);
+		return;
+	}
+	// Only sets Visibility and Text if SensedActor is valid and has changed
+	FText Text = IInteractable::Execute_GetInteractPrompt(SensedActor);
+	InteractWidget->SetPromptText(Text);
+	InteractWidget->SetVisibility(ESlateVisibility::Visible);
+}
+
 /** Performs a box trace from the camera to find an interactable object. */
 bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawDistance, const EDrawDebugTrace::Type Type)
 {
@@ -495,7 +571,7 @@ bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawD
 	GetActorEyesViewPoint(Start, Rot);
 
 	const FVector End = Start + Rot.Vector() * DrawDistance;
-	const FVector HalfSize = FVector(10.f, 10.f, 10.f);
+	const FVector HalfSize = FVector(2.f, 2.f, 2.f);
 	TArray<AActor*> ActorsToIgnore;
 	ActorsToIgnore.Add(this);
 	
@@ -519,7 +595,9 @@ bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawD
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic)); // Include static objects (buttons, walls for occlusion)
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn)); // Include pawns (other players/NPCs)
 	
-	return UKismetSystemLibrary::BoxTraceSingleForObjects(GetWorld(), Start, End, HalfSize, Rot, ObjectTypes, false, ActorsToIgnore , Type, OutHit , true);
+	// Used LineTrace instead of BoxTrace
+	// return UKismetSystemLibrary::BoxTraceSingleForObjects(GetWorld(), Start, End, HalfSize, Rot, ObjectTypes, false, ActorsToIgnore , Type, OutHit , true);
+	return UKismetSystemLibrary::LineTraceSingleForObjects(GetWorld(), Start, End, ObjectTypes, false, ActorsToIgnore, Type, OutHit, true, FLinearColor::Red, FLinearColor::Green, 1.f);
 }
 
 #pragma endregion

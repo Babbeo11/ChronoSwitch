@@ -11,6 +11,7 @@ class UTimelineComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
+class UInteractPromptWidget;
 class AChronoSwitchPlayerState;
 
 UCLASS()
@@ -35,6 +36,12 @@ public:
 	UFUNCTION(Client, Reliable)
 	void Client_ForcedTimelineChange(uint8 NewTimelineID);
 #pragma endregion
+	
+#pragma region UI
+	UPROPERTY(EditDefaultsOnly, Category="UI")
+	TSubclassOf<UInteractPromptWidget> InteractWidgetClass;
+#pragma endregion
+
 
 protected:
 #pragma region Lifecycle
@@ -51,6 +58,11 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Mesh, meta = (AllowPrivateAccess = "true"))
 	USkeletalMeshComponent* FirstPersonMeshComponent;
+#pragma endregion
+
+#pragma region UI
+	UPROPERTY()
+	UInteractPromptWidget* InteractWidget;
 #pragma endregion
 
 #pragma region Input
@@ -166,15 +178,27 @@ protected:
 	/** Stores the rotation of the object relative to the camera at the moment of grabbing. */
 	UPROPERTY(Replicated)
 	FRotator GrabbedRelativeRotation;
-
-	/** Performs a trace from the camera to find interactable objects in the world. */
-	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
 	
 	/** Stores the original collision channel of the grabbed object to restore it upon release. */
 	UPROPERTY(Replicated)
 	TEnumAsByte<ECollisionChannel> GrabbedMeshOriginalCollision;
 #pragma endregion
 
+#pragma region Interaction Sensing System
+	
+	/** Stores pointer to actor in front of the player. */
+	UPROPERTY()
+	AActor* SensedActor;
+	/** Checks for interactable objects in front of the player. */
+	void OnTickSenseInteractable();
+	/** Validates new traced candidate*/
+	AActor* ValidateInteractable(AActor* HitActor);
+	/** Sets visibility and text values only on SensedActor change*/
+	void UpdateInteractWidget();
+	/** Performs a trace from the camera to find interactable objects in the world. */
+	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
+#pragma endregion
+	
 #pragma region Player Management
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
 	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
