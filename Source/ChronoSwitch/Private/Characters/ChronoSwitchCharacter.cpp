@@ -845,15 +845,23 @@ void AChronoSwitchCharacter::UpdatePlayerCollision(AChronoSwitchPlayerState* MyP
 			if (!bIsOnPhysicsObject && GrabbedComponent && DistSq < FMath::Square(HoldDistance + 150.0f))
 			{
 				FHitResult Hit;
-				const float CapsuleHalfHeight = OtherChar->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+				UCapsuleComponent* ProxyCapsule = OtherChar->GetCapsuleComponent();
+				const float Radius = ProxyCapsule->GetScaledCapsuleRadius();
+				const float HalfHeight = ProxyCapsule->GetScaledCapsuleHalfHeight();
+				
+				// Expand slightly to detect contact from sides or bottom.
+				// This ensures that if the held object pushes against the player, we enable physics (gravity/friction)
+				// to prevent them from floating away or being launched infinitely.
+				const FCollisionShape CheckShape = FCollisionShape::MakeCapsule(Radius + 5.0f, HalfHeight + 5.0f);
+				
 				const FVector Start = OtherChar->GetActorLocation();
-				const FVector End = Start - FVector(0.f, 0.f, CapsuleHalfHeight + 10.0f); // Trace slightly below feet
+				const FVector End = Start - FVector(0.f, 0.f, 1.0f); // Tiny sweep to detect overlap
 				
 				FCollisionQueryParams Params;
 				Params.AddIgnoredActor(OtherChar);
 
-				// Trace against the held object's channel.
-				if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, GrabbedComponent->GetCollisionObjectType(), Params))
+				// Sweep against the held object's channel.
+				if (GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, GrabbedComponent->GetCollisionObjectType(), CheckShape, Params))
 				{
 					// Enable physics if we hit the held object.
 					if (Hit.GetComponent() == GrabbedComponent)
