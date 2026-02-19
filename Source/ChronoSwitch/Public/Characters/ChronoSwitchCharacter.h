@@ -118,15 +118,14 @@ protected:
 	/** Handler for the PlayerState's OnTimelineIDChanged delegate. Updates collision and triggers cosmetic effects. */
 	void HandleTimelineUpdate(uint8 NewTimelineID);
 
+	/** Handler for the PlayerState's OnVisorStateChanged delegate. Triggers cosmetic effects. */
+	void HandleVisorStateUpdate(bool bIsVisorActive);
+
 	/** Updates the character's collision ObjectType based on the timeline. */
 	void UpdateCollisionChannel(uint8 NewTimelineID);
 	
 	/** Checks if switching to the other timeline would cause a collision. */
 	bool CheckTimelineOverlap();
-	
-	/** Blueprint event called when a timeline switch occurs, for triggering VFX, SFX, and animations. */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
-	void OnTimelineSwitched(uint8 NewTimelineID);
 	
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnAntiPhasingTriggered();
@@ -134,6 +133,10 @@ protected:
 	/** Cosmetic event called on all clients (Owner and Proxies) to trigger VFX/SFX. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
 	void OnTimelineChangedCosmetic(uint8 NewTimelineID);
+
+	/** Cosmetic event called when the visor state changes to trigger VFX/SFX (e.g. MPC transitions). */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Timeline")
+	void OnVisorStateChangedCosmetic(bool bIsVisorActive);
 
 	/** Server RPC: Requests a timeline switch for the other player (CrossPlayer mode). */
 	UFUNCTION(Server, Reliable)
@@ -215,9 +218,6 @@ protected:
 	/** Handles symmetrical player-vs-player collision logic. */
 	void UpdatePlayerCollision(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS);
 	
-	/** Configures physics settings for remote players (Simulated Proxies) to handle stability vs dragging. */
-	void ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject);
-
 	/** Handles asymmetrical visibility logic for rendering the other player. */
 	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS, float DeltaTime);
 #pragma endregion
@@ -226,12 +226,6 @@ private:
 #pragma region Internal State
 	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
 	FTimerHandle PlayerStateBindTimer;
-
-	/** Tracks the last physics state applied to the proxy to avoid redundant updates. */
-	bool bLastProxyPhysicsState;
-	
-	/** Tracks the last timeline ID of the proxy to handle timeline switches efficiently. */
-	uint8 LastProxyTimelineID;
 
 	/** Current blend value for the timeline material transition (0.0 to 1.0). */
 	float CurrentTimelineBlend;

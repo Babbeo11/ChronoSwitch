@@ -49,9 +49,7 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 	GetMesh()->SetOwnerNoSee(true);
 
 	// Initialize state trackers
-	bLastProxyPhysicsState = false;
 	HeldObjectPos = FVector::ZeroVector;
-	LastProxyTimelineID = 255; // Invalid ID to force initial update
 	CurrentTimelineBlend = 0.0f;
 	CurrentVisibilityBlend = 0.0f;
 }
@@ -725,6 +723,7 @@ void AChronoSwitchCharacter::BindToPlayerState()
 	{
 		// Bind our handler to the PlayerState's delegate.
 		PS->OnTimelineIDChanged.AddUObject(this, &AChronoSwitchCharacter::HandleTimelineUpdate);
+		PS->OnVisorStateChanged.AddUObject(this, &AChronoSwitchCharacter::HandleVisorStateUpdate);
 		
 		// Set the initial collision state WITHOUT triggering cosmetic effects.
 		UpdateCollisionChannel(PS->GetTimelineID());
@@ -754,7 +753,11 @@ void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
 	}
 
 	OnTimelineChangedCosmetic(NewTimelineID);
-	OnTimelineSwitched(NewTimelineID);
+}
+
+void AChronoSwitchCharacter::HandleVisorStateUpdate(bool bIsVisorActive)
+{
+	OnVisorStateChangedCosmetic(bIsVisorActive);
 }
 
 void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
@@ -764,10 +767,8 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 	ECollisionChannel NewTimelineChannel = (NewTimelineID == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
 	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
 
-	// Simulated Proxies manage collision in ConfigureSimulatedProxyPhysics.
-	if (GetLocalRole() == ROLE_SimulatedProxy) return;
-
-	// Configure collision responses for Authority/Autonomous.
+	// Configure collision responses for everyone (Authority, Autonomous, and Simulated Proxies).
+	// Since we removed the manual gravity hack in ConfigureSimulatedProxyPhysics, we must ensure collision is correct here.
 	if (NewTimelineID == 0) // Past
 	{
 		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);  // Block Past Objects
@@ -814,141 +815,6 @@ void AChronoSwitchCharacter::UpdatePlayerCollision(AChronoSwitchPlayerState* MyP
 	{
 		// Ignore collision if in different timelines.
 		MoveIgnoreActorAdd(CachedOtherPlayerCharacter.Get());
-	}
-
-	// Handle physics for the remote player (Simulated Proxy).
-	if (AChronoSwitchCharacter* OtherChar = Cast<AChronoSwitchCharacter>(CachedOtherPlayerCharacter.Get()))
-	{
-		if (OtherChar->GetLocalRole() == ROLE_SimulatedProxy)
-		{
-			UPrimitiveComponent* BaseComponent = OtherChar->GetMovementBase();
-			
-			// Determine if the proxy is on a moving platform (Physics or Held Object).
-			const bool bIsHeldObject = (BaseComponent && BaseComponent == GrabbedComponent);
-			bool bIsOnPhysicsObject = (BaseComponent && BaseComponent->IsSimulatingPhysics()) || bIsHeldObject;
-
-			// Check if standing on a held CausalActor (e.g. FutureMesh).
-			if (!bIsOnPhysicsObject && BaseComponent)
-			{
-				if (ACausalActor* CausalActor = Cast<ACausalActor>(BaseComponent->GetOwner()))
-				{
-					if (CausalActor->IsHeld())
-					{
-						bIsOnPhysicsObject = true;
-					}
-				}
-			}
-
-			// Perform local detection since replicated movement base might lag.
-			// Only trace if the other player is close enough to potentially be on our held object.
-			const float DistSq = FVector::DistSquared(GetActorLocation(), OtherChar->GetActorLocation());
-			if (!bIsOnPhysicsObject && GrabbedComponent && DistSq < FMath::Square(HoldDistance + 150.0f))
-			{
-				FHitResult Hit;
-				UCapsuleComponent* ProxyCapsule = OtherChar->GetCapsuleComponent();
-				const float Radius = ProxyCapsule->GetScaledCapsuleRadius();
-				const float HalfHeight = ProxyCapsule->GetScaledCapsuleHalfHeight();
-				
-				// Expand slightly to detect contact from sides or bottom.
-				// This ensures that if the held object pushes against the player, we enable physics (gravity/friction)
-				// to prevent them from floating away or being launched infinitely.
-				const FCollisionShape CheckShape = FCollisionShape::MakeCapsule(Radius + 5.0f, HalfHeight + 5.0f);
-				
-				const FVector Start = OtherChar->GetActorLocation();
-				const FVector End = Start - FVector(0.f, 0.f, 1.0f); // Tiny sweep to detect overlap
-				
-				FCollisionQueryParams Params;
-				Params.AddIgnoredActor(OtherChar);
-
-				// Sweep against the held object's channel.
-				if (GetWorld()->SweepSingleByChannel(Hit, Start, End, FQuat::Identity, GrabbedComponent->GetCollisionObjectType(), CheckShape, Params))
-				{
-					// Enable physics if we hit the held object.
-					if (Hit.GetComponent() == GrabbedComponent)
-					{
-						bIsOnPhysicsObject = true;
-					}
-					else if (ACausalActor* HitCausalActor = Cast<ACausalActor>(Hit.GetActor()))
-					{
-						if (HitCausalActor->IsHeld())
-						{
-							bIsOnPhysicsObject = true;
-						}
-					}
-				}
-			}
-			
-			ConfigureSimulatedProxyPhysics(OtherChar, OtherPS, bIsOnPhysicsObject);
-		}
-	}
-}
-
-void AChronoSwitchCharacter::ConfigureSimulatedProxyPhysics(AChronoSwitchCharacter* ProxyChar, AChronoSwitchPlayerState* ProxyPS, bool bIsOnPhysicsObject)
-{
-	UCharacterMovementComponent* ProxyCMC = ProxyChar->GetCharacterMovement();
-	UCapsuleComponent* ProxyCapsule = ProxyChar->GetCapsuleComponent();
-
-	if (!ProxyCMC || !ProxyCapsule) return;
-
-	// Avoid redundant physics state updates.
-	const uint8 CurrentProxyTimelineID = ProxyPS->GetTimelineID();
-	if (bIsOnPhysicsObject == bLastProxyPhysicsState && CurrentProxyTimelineID == LastProxyTimelineID)
-	{
-		return;
-	}
-	bLastProxyPhysicsState = bIsOnPhysicsObject;
-	LastProxyTimelineID = CurrentProxyTimelineID;
-
-	// Switch between "Dragging Mode" (Physics Enabled) and "Stability Mode" (Physics Disabled).
-
-	if (bIsOnPhysicsObject)
-	{
-		// --- DRAGGING MODE ---
-		// Enable gravity/physics so the player moves with the object via friction.
-		ProxyCMC->GravityScale = 1.0f;
-		
-		// Restore world collision.
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
-
-		// Configure collision to block ONLY objects in the Proxy's current timeline.
-		if (CurrentProxyTimelineID == 0) // Past
-		{
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Block);
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
-			// Block Past Objects (Channel 3) so they can stand on the held cube
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Ignore);
-		}
-		else // Future
-		{
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Block);
-			// Block Future Objects (Channel 4) so they can stand on the held cube
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore);
-			ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Block);
-		}
-	}
-	else
-	{
-		// --- STABILITY MODE (Default) ---
-		// Disable gravity to prevent jitter on static floors.
-		ProxyCMC->GravityScale = 0.0f;
-		
-		// Ignore world geometry; rely on server interpolation.
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Ignore);
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Ignore);
-		
-		// Ignore Timeline Collision Channels (1 & 2) to prevent jitter.
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore);
-
-		// Block PhysicsBody to allow pushing by held objects.
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block);
-		
-		// Ignore Timeline Object Channels to prevent floor jitter.
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Ignore);
-		ProxyCapsule->SetCollisionResponseToChannel(ECC_GameTraceChannel4, ECR_Ignore);
 	}
 }
 
