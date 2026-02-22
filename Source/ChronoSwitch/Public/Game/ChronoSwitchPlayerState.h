@@ -55,6 +55,9 @@ public:
 	/** Forcefully sets the visor state. Can only be called on the server. */
 	UFUNCTION(BlueprintAuthorityOnly, Category = "Timeline")
 	void SetVisorActive(bool bNewState);
+	
+	UFUNCTION(BlueprintAuthorityOnly, Category = "Timeline")
+	void SetCanSwitchTimeline(bool bNewState);
 
 protected:
 	// --- Replicated Properties ---
@@ -66,6 +69,9 @@ protected:
 	/** True if the special visor is active, allowing the player to see elements from the other timeline. */
 	UPROPERTY(ReplicatedUsing = OnRep_VisorActive, BlueprintReadOnly, Category = "Timeline")
 	bool bVisorActive;
+	
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Timeline")
+	bool bCanSwitchTimeline;
 	
 	/** Standard Unreal function for defining replicated properties. */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

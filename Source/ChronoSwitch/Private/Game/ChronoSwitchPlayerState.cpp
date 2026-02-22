@@ -8,6 +8,7 @@ AChronoSwitchPlayerState::AChronoSwitchPlayerState()
 {
 	TimelineID = 0;
 	bVisorActive = true;
+	bCanSwitchTimeline = true;
 	
 	// A higher network priority ensures timeline state changes are sent promptly.
 	NetPriority = 3.0f;
@@ -19,10 +20,13 @@ void AChronoSwitchPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 	DOREPLIFETIME(AChronoSwitchPlayerState, TimelineID);
 	DOREPLIFETIME(AChronoSwitchPlayerState, bVisorActive);
+	DOREPLIFETIME(AChronoSwitchPlayerState, bCanSwitchTimeline);
 }
 
 void AChronoSwitchPlayerState::RequestTimelineChange(uint8 NewID)
 {
+	if (!bCanSwitchTimeline) return;
+	
 	if (TimelineID == NewID) return;
 
 	// Client-Side Prediction:
@@ -84,6 +88,11 @@ void AChronoSwitchPlayerState::SetVisorActive(bool bNewState)
 	}
 }
 
+void AChronoSwitchPlayerState::SetCanSwitchTimeline(bool bNewState)
+{
+	bCanSwitchTimeline = bNewState;
+}
+
 void AChronoSwitchPlayerState::Multicast_TimelineChanged_Implementation(uint8 NewID)
 {
 	// Update local state on all clients immediately.
@@ -123,6 +132,8 @@ void AChronoSwitchPlayerState::OnRep_VisorActive(bool bOldVisorActive)
 
 void AChronoSwitchPlayerState::Server_SetTimelineID_Implementation(uint8 NewID)
 {
+	if (!bCanSwitchTimeline) return;
+	
 	// The server calls its own authoritative function to change the state.
 	SetTimelineID(NewID);
 }

@@ -86,4 +86,7 @@ private:
 
 	/** Updates the visibility and location of the GhostMesh based on desync distance. */
 	void UpdateGhostVisuals();
+
+	/** Tracks the velocity of the FutureMesh during kinematic movement to apply upon release. */
+	FVector FutureMeshVelocity;
 };

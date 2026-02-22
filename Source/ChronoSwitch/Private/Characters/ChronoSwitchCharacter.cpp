@@ -5,7 +5,6 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Game/ChronoSwitchPlayerState.h"
-#include "EngineUtils.h"
 #include "Blueprint/UserWidget.h"
 #include "Game/ChronoSwitchGameState.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -50,8 +49,10 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 
 	// Initialize state trackers
 	HeldObjectPos = FVector::ZeroVector;
+	HeldObjectVelocity = FVector::ZeroVector;
 	CurrentTimelineBlend = 0.0f;
 	CurrentVisibilityBlend = 0.0f;
+	CachedBodyMID = nullptr;
 }
 
 void AChronoSwitchCharacter::BeginPlay()
@@ -312,6 +313,7 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 			
 			// Initialize local position tracker to prevent network jitter.
 			HeldObjectPos = ComponentToGrab->GetComponentLocation();
+			HeldObjectVelocity = FVector::ZeroVector;
 
 			// Notify the actor that it has been grabbed.
 			if (ATimelineBaseActor* TimelineActor = Cast<ATimelineBaseActor>(ComponentToGrab->GetOwner()))
@@ -344,6 +346,9 @@ void AChronoSwitchCharacter::Server_Release_Implementation()
 		// Restore physics simulation.
 		GrabbedMesh->SetSimulatePhysics(true);
 		GrabbedMesh->WakeAllRigidBodies();
+		
+		// Apply the calculated velocity to preserve momentum (prevents clipping when falling).
+		GrabbedMesh->SetPhysicsLinearVelocity(HeldObjectVelocity);
 
 		// Restore original collision channel.
 		GrabbedMesh->SetCollisionObjectType(GrabbedMeshOriginalCollision);
@@ -379,6 +384,7 @@ void AChronoSwitchCharacter::OnRep_GrabbedComponent(UPrimitiveComponent* OldComp
 		
 		// Initialize local position tracker.
 		HeldObjectPos = GrabbedComponent->GetComponentLocation();
+		HeldObjectVelocity = FVector::ZeroVector;
 
 		// Notify the actor on the Client.
 		if (ATimelineBaseActor* TimelineActor = Cast<ATimelineBaseActor>(GrabbedComponent->GetOwner()))
@@ -420,6 +426,9 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 	// Kinematic update for held object. Runs on Simulated Proxies too for visual smoothness.
 	if (GrabbedComponent)
 	{
+		// Capture previous position to calculate velocity.
+		const FVector OldPos = HeldObjectPos;
+		
 		FVector CameraLoc;
 		FRotator CameraRot;
 
@@ -446,20 +455,26 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 		// Apply Yaw offset only to keep the object upright.
 		const FRotator TargetRotation = FRotator(0.0f, CameraRot.Yaw + GrabbedRelativeRotation.Yaw, 0.0f);
 
+		// Calculate intended movement to check for lifting.
+		const FVector MoveDelta = TargetLocation - CurrentLoc;
+		const bool bIsLifting = MoveDelta.Z > 0.1f;
+
 		// Allow lifting the other player by ignoring collision if they are standing on it.
 		if (CachedOtherPlayerCharacter.IsValid())
 		{
-			bool bShouldIgnore = (CachedOtherPlayerCharacter->GetMovementBase() == GrabbedComponent);
-
-			// Enforce timeline isolation manually.
-			if (CachedOtherPlayerState.IsValid() && CachedMyPlayerState.IsValid())
-			{
-				if (CachedOtherPlayerState->GetTimelineID() != CachedMyPlayerState->GetTimelineID())
-				{
-					bShouldIgnore = true;
-				}
-			}
+			// Geometric Check: Ensure player is physically ABOVE the mesh.
+			const float CharBottomZ = CachedOtherPlayerCharacter->GetActorLocation().Z - CachedOtherPlayerCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+			const FBoxSphereBounds MeshBounds = GrabbedComponent->CalcBounds(GrabbedComponent->GetComponentTransform());
+			const float MeshTopZ = MeshBounds.Origin.Z + MeshBounds.BoxExtent.Z;
 			
+			const bool bIsPhysicallyAbove = CharBottomZ >= (MeshTopZ - 15.0f);
+			
+			// Only ignore collision if:
+			// 1. Engine says they are on it (GetMovementBase)
+			// 2. We are moving UP (bIsLifting)
+			// 3. They are geometrically on top (bIsPhysicallyAbove)
+			const bool bShouldIgnore = (CachedOtherPlayerCharacter->GetMovementBase() == GrabbedComponent) && bIsLifting && bIsPhysicallyAbove;
+
 			GrabbedComponent->IgnoreActorWhenMoving(CachedOtherPlayerCharacter.Get(), bShouldIgnore);
 		}
 
@@ -478,14 +493,18 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 			// Apply friction if dragging on ground.
 			if (Hit.ImpactNormal.Z > 0.7f)
 			{
-				const FVector TargetSlidePos = BlockedLoc + SlideDelta;
-				const FVector NewPos = FMath::VInterpTo(BlockedLoc, TargetSlidePos, DeltaTime, 15.0f);
-				SlideDelta = NewPos - BlockedLoc;
+				// Simple friction: Scale down the movement to simulate drag.
+				// Lower value = More Friction / Heavier object.
+				// 0.2f feels like dragging a heavy box.
+				SlideDelta *= 0.2f;
 			}
 
-			if (!SlideDelta.IsNearlyZero(0.1f))
+			if (!SlideDelta.IsNearlyZero(0.01f))
 			{
-				GrabbedComponent->SetWorldLocationAndRotation(BlockedLoc + SlideDelta, TargetRotation, true, &Hit);
+				// Nudge slightly off the surface (0.5 units) to prevent catching on floor seams/geometry edges.
+				const FVector Nudge = Hit.ImpactNormal * 0.5f;
+				
+				GrabbedComponent->SetWorldLocationAndRotation(BlockedLoc + Nudge + SlideDelta, TargetRotation, true, &Hit);
 				HeldObjectPos = GrabbedComponent->GetComponentLocation();
 			}
 			else
@@ -496,6 +515,12 @@ void AChronoSwitchCharacter::UpdateHeldObjectTransform(float DeltaTime)
 		else
 		{
 			HeldObjectPos = TargetLocation;
+		}
+
+		// Calculate velocity for momentum preservation on release.
+		if (DeltaTime > KINDA_SMALL_NUMBER)
+		{
+			HeldObjectVelocity = (HeldObjectPos - OldPos) / DeltaTime;
 		}
 	}
 }
@@ -586,16 +611,16 @@ bool AChronoSwitchCharacter::BoxTraceFront(FHitResult& OutHit, const float DrawD
 	const ECollisionChannel PlayerChannel = (PS->GetTimelineID() == 0) ? ECC_GameTraceChannel1 : ECC_GameTraceChannel2;
 
 	// Use Object Trace to detect specific timeline objects.
-	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
-	ObjectTypes.Reserve(6); // Prevent memory reallocations.
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(TargetChannel));
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(PlayerChannel));
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_PhysicsBody)); // Also include standard physics objects
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldDynamic)); // Include dynamic objects (props, movers)
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic)); // Include static objects (buttons, walls for occlusion)
-	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn)); // Include pawns (other players/NPCs)
+	// Reuse the member array to avoid heap allocation every frame.
+	ReusableTraceObjectTypes.Reset(); // Resets count but keeps memory capacity.
+	ReusableTraceObjectTypes.Add(UEngineTypes::ConvertToObjectType(TargetChannel));
+	ReusableTraceObjectTypes.Add(UEngineTypes::ConvertToObjectType(PlayerChannel));
+	ReusableTraceObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_PhysicsBody));
+	ReusableTraceObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldDynamic));
+	ReusableTraceObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_WorldStatic));
+	ReusableTraceObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECC_Pawn));
 	
-	return UKismetSystemLibrary::LineTraceSingleForObjects(GetWorld(), Start, End, ObjectTypes, false, ActorsToIgnore, Type, OutHit, true, FLinearColor::Red, FLinearColor::Green, 1.f);
+	return UKismetSystemLibrary::LineTraceSingleForObjects(GetWorld(), Start, End, ReusableTraceObjectTypes, false, ActorsToIgnore, Type, OutHit, true, FLinearColor::Red, FLinearColor::Green, 1.f);
 }
 
 #pragma endregion
@@ -757,7 +782,11 @@ void AChronoSwitchCharacter::HandleTimelineUpdate(uint8 NewTimelineID)
 
 void AChronoSwitchCharacter::HandleVisorStateUpdate(bool bIsVisorActive)
 {
-	OnVisorStateChangedCosmetic(bIsVisorActive);
+	// Only trigger the cosmetic event (which drives the Global MPC) if this is the local player.
+	if (IsLocallyControlled())
+	{
+		OnVisorStateChangedCosmetic(bIsVisorActive);
+	}
 }
 
 void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
@@ -768,7 +797,6 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 	GetCapsuleComponent()->SetCollisionObjectType(NewTimelineChannel);
 
 	// Configure collision responses for everyone (Authority, Autonomous, and Simulated Proxies).
-	// Since we removed the manual gravity hack in ConfigureSimulatedProxyPhysics, we must ensure collision is correct here.
 	if (NewTimelineID == 0) // Past
 	{
 		GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Block);  // Block Past Objects
@@ -788,14 +816,19 @@ void AChronoSwitchCharacter::UpdateCollisionChannel(uint8 NewTimelineID)
 /** Finds the other player character in the world and caches a weak pointer to it for optimization. */
 void AChronoSwitchCharacter::CacheOtherPlayerCharacter()
 {
-	for (TActorIterator<AChronoSwitchCharacter> It(GetWorld()); It; ++It)
+	// Iterate over PlayerArray to find the other player efficiently.
+	if (AGameStateBase* GameState = GetWorld()->GetGameState())
 	{
-		AChronoSwitchCharacter* FoundChar = *It;
-		if (FoundChar && FoundChar != this)
+		for (APlayerState* PS : GameState->PlayerArray)
 		{
-			CachedOtherPlayerCharacter = FoundChar;
-			
-			return; // Found it, no need to continue looping
+			if (AChronoSwitchCharacter* FoundChar = Cast<AChronoSwitchCharacter>(PS->GetPawn()))
+			{
+				if (FoundChar != this)
+				{
+					CachedOtherPlayerCharacter = FoundChar;
+					return;
+				}
+			}
 		}
 	}
 }
@@ -838,29 +871,31 @@ void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* My
 		const bool bShouldOtherBeVisibleAsGhost = !bAreInSameTimeline && bIsVisorActive;
 		const bool bShouldOtherBeVisible = bAreInSameTimeline || bShouldOtherBeVisibleAsGhost;
 		
-		// We removed the immediate SetHiddenInGame here to allow the material transition below to handle visibility gradually.
-		
 		// Update Material Parameter: 1.0 if in same timeline, 0.0 if different.
 		// We check slot 0 (usually the body). Ensure your material has a Scalar Parameter named "TimelineBlend".
 		if (OtherPlayerMesh->GetNumMaterials() > 0)
 		{
-			UMaterialInstanceDynamic* BodyMID = Cast<UMaterialInstanceDynamic>(OtherPlayerMesh->GetMaterial(0));
-			if (!BodyMID)
+			// Cache the Dynamic Material Instance to avoid casting every frame.
+			if (!CachedBodyMID)
 			{
-				BodyMID = OtherPlayerMesh->CreateAndSetMaterialInstanceDynamic(0);
+				CachedBodyMID = Cast<UMaterialInstanceDynamic>(OtherPlayerMesh->GetMaterial(0));
+				if (!CachedBodyMID)
+				{
+					CachedBodyMID = OtherPlayerMesh->CreateAndSetMaterialInstanceDynamic(0);
+				}
 			}
 			
-			if (BodyMID)
+			if (CachedBodyMID)
 			{
 				const float TargetBlend = bAreInSameTimeline ? 1.0f : 0.0f;
 				// Interpolate smoothly towards the target value (Speed 4.0 gives a nice transition of ~1.0s).
 				CurrentTimelineBlend = FMath::FInterpTo(CurrentTimelineBlend, TargetBlend, DeltaTime, 4.0f);
-				BodyMID->SetScalarParameterValue(FName("MaterialState"), CurrentTimelineBlend);
+				CachedBodyMID->SetScalarParameterValue(FName("MaterialState"), CurrentTimelineBlend);
 
 				// Update Visibility Parameter: 0.0 if Visible, 1.0 if Invisible.
 				const float TargetVisibility = bShouldOtherBeVisible ? 0.0f : 1.0f;
 				CurrentVisibilityBlend = FMath::FInterpTo(CurrentVisibilityBlend, TargetVisibility, DeltaTime, 4.0f);
-				BodyMID->SetScalarParameterValue(FName("FullVanish"), CurrentVisibilityBlend);
+				CachedBodyMID->SetScalarParameterValue(FName("FullVanish"), CurrentVisibilityBlend);
 
 				// Completely hide the mesh only when fully dissolved (>= 0.99) to save rendering cost.
 				// It will automatically unhide when the value drops below 0.99.

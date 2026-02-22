@@ -178,6 +178,9 @@ protected:
 	/** Tracks the local position of the held object to prevent network jitter. */
 	FVector HeldObjectPos;
 
+	/** Tracks the velocity of the held object to impart momentum upon release. */
+	FVector HeldObjectVelocity;
+
 	/** Stores the rotation of the object relative to the camera at the moment of grabbing. */
 	UPROPERTY(Replicated)
 	FRotator GrabbedRelativeRotation;
@@ -232,5 +235,12 @@ private:
 
 	/** Current blend value for the visibility transition (0.0 = Visible, 1.0 = Invisible). */
 	float CurrentVisibilityBlend;
+
+	/** Cached pointer to the dynamic material instance of the other player to avoid casting every frame. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> CachedBodyMID;
+
+	/** Reusable array for trace object types to avoid heap allocation every frame. */
+	TArray<TEnumAsByte<EObjectTypeQuery>> ReusableTraceObjectTypes;
 #pragma endregion
 };

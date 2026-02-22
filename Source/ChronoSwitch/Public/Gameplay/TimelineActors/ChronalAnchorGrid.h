@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "TimelineBaseActor.h"
 #include "ChronalAnchorGrid.generated.h"
 
 class AChronoSwitchCharacter;
@@ -23,7 +22,7 @@ enum class EForcedTimeline : uint8
  * timeline, and can disable visor
  */
 UCLASS()
-class CHRONOSWITCH_API AChronalAnchorGrid : public ATimelineBaseActor
+class CHRONOSWITCH_API AChronalAnchorGrid : public AActor
 {
 	GENERATED_BODY()
 	//To Do: Use case of objects that passes the barrier?
@@ -39,12 +38,17 @@ public:
 #pragma endregion
 	
 #pragma region Settings
-	// Dictates whether it should disable visor or not
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CAG Settings")
-	bool shouldDisableVisor;
 	// Target Timeline of the C.A.G. Zone
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "CAG Settings")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CAG Settings")
 	EForcedTimeline TargetForcedTimeline;
+	
+	// Dictates whether it should disable visor or not
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CAG Settings")
+	bool bShouldDisableVisor;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CAG Settings")
+	bool bShouldDisableSwitch;
+	
 	// The map stores the sign of the entry direction for each player
 	UPROPERTY()
 	TMap<AChronoSwitchCharacter*, float> StoredDirectionSigns;
@@ -62,7 +66,13 @@ protected:
 #pragma region Components
 	/** Mesh of the Chronal Anchor Grid barrier */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UStaticMeshComponent> BarrierMesh;
+	UStaticMeshComponent* BarrierMesh;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
+	UStaticMeshComponent* GridBorder1;
+	
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
+	UStaticMeshComponent* GridBorder2;
 	
 	/** Collider box that triggers the effect of the barrier */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")

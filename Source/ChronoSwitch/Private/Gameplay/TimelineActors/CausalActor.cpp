@@ -3,8 +3,10 @@
 #include "Gameplay/TimelineActors/CausalActor.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
-#include "EngineUtils.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/PlayerState.h"
 
 ACausalActor::ACausalActor()
 {
@@ -26,6 +28,7 @@ ACausalActor::ACausalActor()
 	SpringStiffness = 30.0f;    
 	SpringDamping = 5.0f;
 	InteractedComponent = nullptr;
+	FutureMeshVelocity = FVector::ZeroVector;
 	
 	// Configure Ghost Mesh
 	GhostMesh = CreateDefaultSubobject<UStaticMeshComponent>("GhostMesh");
@@ -53,6 +56,7 @@ ACausalActor::ACausalActor()
 	{
 		FutureMesh->SetSimulatePhysics(true);
 		FutureMesh->SetEnableGravity(true);
+		FutureMesh->BodyInstance.bUseCCD = true; 
 
 		// Note: FutureMesh movement is driven locally by logic, not directly replicated.
 	}
@@ -82,6 +86,13 @@ void ACausalActor::OnRep_InteractedComponent()
 void ACausalActor::BeginPlay()
 {
 	Super::BeginPlay();
+	
+	// Detach FutureMesh from PastMesh at startup.
+	// This ensures FutureMesh is driven purely by custom logic (UpdateSlaveMesh) rather than scene hierarchy inheritance.
+	if (FutureMesh)
+	{
+		FutureMesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	}
 	
 	// Ensure physics settings are correct at runtime start.
 	if (HasAuthority())
@@ -132,6 +143,7 @@ void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabbe
 	{
 		FutureMesh->SetSimulatePhysics(false);
 		FutureMesh->SetEnableGravity(false);
+		FutureMeshVelocity = FVector::ZeroVector;
 	}
 }
 
@@ -151,10 +163,12 @@ void ACausalActor::NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabb
 		FutureMesh->SetSimulatePhysics(true);
 		FutureMesh->SetEnableGravity(true);
 
-		// Preserve momentum: Copy velocity from PastMesh to FutureMesh for a smooth release arc.
+		// Apply calculated velocity to preserve momentum based on actual movement (respecting collisions).
+		FutureMesh->SetPhysicsLinearVelocity(FutureMeshVelocity);
+
+		// Preserve angular momentum from PastMesh (rotation is synced directly).
 		if (PastMesh)
 		{
-			FutureMesh->SetPhysicsLinearVelocity(PastMesh->GetPhysicsLinearVelocity());
 			FutureMesh->SetPhysicsAngularVelocityInDegrees(PastMesh->GetPhysicsAngularVelocityInDegrees());
 		}
 	}
@@ -171,19 +185,42 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 	// FutureMesh must follow kinematically (Sweep) to allow lifting other players.
 	if (InteractedComponent == PastMesh)
 	{
+		const FVector CurrentLoc = FutureMesh->GetComponentLocation();
+		const FVector MoveDelta = TargetLocation - CurrentLoc;
+		const bool bIsLifting = MoveDelta.Z > 0.1f;
+
 		// Ignore collision with players standing on the mesh.
 		// This allows the mesh to move UP into them, letting their CharacterMovementComponent resolve the lift.
-		for (TActorIterator<ACharacter> It(GetWorld()); It; ++It)
+		// Iterate over PlayerArray instead of all world actors.
+		if (AGameStateBase* GameState = GetWorld()->GetGameState())
 		{
-			ACharacter* Char = *It;
-			if (Char && Char->GetMovementBase() == FutureMesh)
+			for (APlayerState* PS : GameState->PlayerArray)
 			{
-				FutureMesh->IgnoreActorWhenMoving(Char, true);
+				if (ACharacter* Char = Cast<ACharacter>(PS->GetPawn()))
+				{
+						// Geometric Check: Ensure player is physically ABOVE the mesh, not just touching it from side/bottom.
+						const float CharBottomZ = Char->GetActorLocation().Z - Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+						const FBoxSphereBounds MeshBounds = FutureMesh->CalcBounds(FutureMesh->GetComponentTransform());
+						const float MeshTopZ = MeshBounds.Origin.Z + MeshBounds.BoxExtent.Z;
+						
+						// Tolerance (e.g. 15 units) allows for slight penetration or step-downs, but rejects side/bottom hits.
+						const bool bIsPhysicallyAbove = CharBottomZ >= (MeshTopZ - 15.0f);
+
+						if (Char->GetMovementBase() == FutureMesh && bIsPhysicallyAbove && bIsLifting)
+					{
+						FutureMesh->IgnoreActorWhenMoving(Char, true);
+					}
+				}
 			}
 		}
 		
 		FHitResult Hit;
 		FutureMesh->SetWorldLocationAndRotation(TargetLocation, TargetRotation, true, &Hit);
+
+		if (DeltaTime > KINDA_SMALL_NUMBER)
+		{
+			FutureMeshVelocity = (FutureMesh->GetComponentLocation() - CurrentLoc) / DeltaTime;
+		}
 		
 		// Clear ignores immediately after the move.
 		FutureMesh->ClearMoveIgnoreActors();
@@ -199,6 +236,14 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 		if (Distance > MaxAllowedDistance)
 		{
 			FVector Delta = TargetLocation - CurrentLocation;
+			
+			// Clamp the pull vector to prevent excessive force generation when far away.
+			const float MaxPullDistance = 1000.0f;
+			if (Delta.SizeSquared() > MaxPullDistance * MaxPullDistance)
+			{
+				Delta = Delta.GetSafeNormal() * MaxPullDistance;
+			}
+			
 			FVector GravityComp = FVector::ZeroVector;
 			FVector VelocityForDamping = FutureMesh->GetComponentVelocity(); 
 
@@ -267,10 +312,10 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 				}
 			}
 		
-			// Calculate Spring Force (Hooke's Law: F = -k * x)
+			// Calculate Spring Force 
 			const FVector SpringForce = Delta * SpringStiffness;
 		
-			// Calculate Damping Force (F_d = -c * v)
+			// Calculate Damping Force 
 			const FVector DampingForce = -VelocityForDamping * SpringDamping;
 		
 			const FVector TotalForce = SpringForce + DampingForce + GravityComp;
