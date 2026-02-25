@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "OnlineSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "ChronoSwitchGameInstance.generated.h"
 
@@ -13,4 +14,7 @@ UCLASS()
 class CHRONOSWITCH_API UChronoSwitchGameInstance : public UGameInstance
 {
 	GENERATED_BODY()
+	
+public:
+	IOnlineSubsystem* OnlineSubsystem;
 };
