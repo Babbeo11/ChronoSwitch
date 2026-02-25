@@ -3,6 +3,10 @@
 
 #include "Game/MultiplayerSessionsSubsystem.h"
 
+UMultiplayerSessionsSubsystem::UMultiplayerSessionsSubsystem()
+{
+}
+
 void UMultiplayerSessionsSubsystem::CreateSession(int32 NumPublicConnections, bool bIsLAN)
 {
 }
