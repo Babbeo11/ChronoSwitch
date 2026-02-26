@@ -88,6 +88,9 @@ private:
 	/** Helper to apply specific collision settings to a mesh based on its timeline ID. */
 	void ConfigureMeshCollision(UStaticMeshComponent* Mesh, uint8 MeshTimelineID);
 	
+	/** Update ShadowCacheInvalidationBehavior based on the mesh state. */
+	void UpdateShadowCache(UStaticMeshComponent* Mesh, bool bAlwaysCache);
+	
 	/** Handles updates from the TimelineObserver when the player switches timelines. */
 	UFUNCTION()
 	void HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool bIsVisorActive);

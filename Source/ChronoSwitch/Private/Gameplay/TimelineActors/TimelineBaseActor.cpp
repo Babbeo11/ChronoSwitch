@@ -141,6 +141,22 @@ void ATimelineBaseActor::ConfigureMeshCollision(UStaticMeshComponent* Mesh, uint
 	Mesh->SetCollisionResponseToChannel(OtherPlayerChannel, ECR_Ignore);
 }
 
+void ATimelineBaseActor::UpdateShadowCache(UStaticMeshComponent* Mesh, bool bAlwaysCache)
+{
+	if (!Mesh) return;
+
+	if (bAlwaysCache)
+	{
+		Mesh->ShadowCacheInvalidationBehavior = EShadowCacheInvalidationBehavior::Always;
+	}
+	else
+	{
+		Mesh->ShadowCacheInvalidationBehavior = EShadowCacheInvalidationBehavior::Auto;
+	}
+	
+	Mesh->MarkRenderStateDirty();
+}
+
 void ATimelineBaseActor::HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool bIsVisorActive)
 {
 	// Updates visual visibility based on the player's state.
@@ -175,6 +191,14 @@ void ATimelineBaseActor::HandlePlayerTimelineUpdate(uint8 PlayerTimelineID, bool
 		bFutureVisible = !bPlayerIsInPast;
 		break;
 	}
+
+	// A mesh requires 'Always' cache invalidation if it's visible as a "ghost"
+	const bool bPastIsGhost = bPastVisible && !bPlayerIsInPast;
+	const bool bFutureIsGhost = bFutureVisible && bPlayerIsInPast;
+
+	// Apply Shadow Cache settings
+	UpdateShadowCache(PastMesh, bPastIsGhost);
+	UpdateShadowCache(FutureMesh, bFutureIsGhost);
 
 	// --- Visual Transition ---
 	
