@@ -35,9 +35,6 @@ public:
 	/** Checks if the specific component can be grabbed (e.g., prevents grabbing Future if Past is held). */
 	bool CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const;
 
-	/** Returns true if any part of this actor is currently being held by a player. */
-	bool IsHeld() const { return InteractedComponent != nullptr; }
-
 protected:
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -75,6 +72,10 @@ protected:
 	/** The component currently being held by a player, if any. Replicated to sync state. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_InteractedComponent, Category = "Causal State")
 	TObjectPtr<UPrimitiveComponent> InteractedComponent;
+
+	/** The character currently holding this actor. Replicated to handle state changes. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Causal State")
+	TObjectPtr<ACharacter> InteractingCharacter;
 
 	/** Handles changes to the interaction state on clients. */
 	UFUNCTION()

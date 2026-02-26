@@ -144,12 +144,14 @@ protected:
 #pragma endregion
 
 #pragma region Interaction System
+public:
 	/** Initiates the grab logic. */
 	void AttemptGrab();
 	
 	/** Initiates the release logic. */
 	void Release();
 
+protected:
 	/** Server RPC: Validates and executes the grab logic. */
 	UFUNCTION(Server, Reliable)
 	void Server_Grab();
@@ -198,7 +200,7 @@ protected:
 	/** Checks for interactable objects in front of the player. */
 	void OnTickSenseInteractable();
 	/** Validates new traced candidate*/
-	AActor* ValidateInteractable(AActor* HitActor);
+	AActor* ValidateInteractable(AActor* HitActor, UPrimitiveComponent* HitComponent);
 	/** Sets visibility and text values only on SensedActor change*/
 	void UpdateInteractWidget();
 	/** Performs a trace from the camera to find interactable objects in the world. */

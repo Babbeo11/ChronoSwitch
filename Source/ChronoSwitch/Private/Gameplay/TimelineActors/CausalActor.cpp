@@ -1,6 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Gameplay/TimelineActors/CausalActor.h"
+#include "Characters/ChronoSwitchCharacter.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/GameStateBase.h"
@@ -29,6 +30,7 @@ ACausalActor::ACausalActor()
 	SpringDamping = 5.0f;
 	InteractedComponent = nullptr;
 	FutureMeshVelocity = FVector::ZeroVector;
+	InteractingCharacter = nullptr;
 	
 	// Configure Ghost Mesh
 	GhostMesh = CreateDefaultSubobject<UStaticMeshComponent>("GhostMesh");
@@ -68,6 +70,7 @@ void ACausalActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ACausalActor, InteractedComponent);
+	DOREPLIFETIME(ACausalActor, InteractingCharacter);
 }
 
 void ACausalActor::OnRep_InteractedComponent()
@@ -117,19 +120,59 @@ void ACausalActor::Interact_Implementation(ACharacter* Interactor)
 
 FText ACausalActor::GetInteractPrompt_Implementation()
 {
-	if (IsHeld())
-		return FText::FromString("Press F to Release");
+	// Determine if the local player is the one holding the object.
+	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	const APawn* LocalPawn = PC ? PC->GetPawn() : nullptr;
+	
+	if (InteractedComponent)
+	{
+		if (InteractingCharacter == LocalPawn)
+		{
+			return FText::FromString("Press F to Release");
+		}
+		// If they are already holding the PastMesh (Priority), we cannot steal it.
+		if (InteractedComponent == PastMesh)
+		{
+			// Already held by someone with max priority. Cannot grab.
+			return FText();
+		}
+			
+		// If they hold FutureMesh, we can steal it by grabbing PastMesh.
+		return FText::FromString("Press F to Grab");
+	}
+
 	return FText::FromString("Press F to Grab");
 }
 
 bool ACausalActor::CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const
 {
-	// Enforce mutual exclusion: if any part is held, nothing else can be grabbed.
-	return InteractedComponent == nullptr;
+	// If no one is holding it, it can be grabbed.
+	if (!InteractedComponent)
+	{
+		return true;
+	}
+
+	// Priority Logic: A grab on the PastMesh always succeeds, even if the FutureMesh is held.
+	if (MeshToGrab == PastMesh)
+	{
+		return true;
+	}
+
+	// Otherwise (trying to grab FutureMesh), the grab fails if anything is already held.
+	return false;
 }
 
 void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabber)
 {
+	// If the PastMesh is being grabbed while the FutureMesh is held by another player, force the other player to release.
+	if (InteractedComponent && InteractingCharacter && InteractingCharacter != Grabber)
+	{
+		if (AChronoSwitchCharacter* OtherChar = Cast<AChronoSwitchCharacter>(InteractingCharacter))
+		{
+			OtherChar->Release();
+		}
+	}
+	
 	InteractedComponent = Mesh;
 
 	// Ensure this actor ticks AFTER the character holding it to prevent vertical jitter (1-frame lag).
@@ -137,6 +180,8 @@ void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabbe
 	{
 		AddTickPrerequisiteActor(Grabber);
 	}
+	
+	InteractingCharacter = Grabber;
 
 	// If PastMesh is grabbed, FutureMesh must become kinematic to follow it precisely.
 	if (FutureMesh && Mesh == PastMesh)
@@ -150,6 +195,7 @@ void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabbe
 void ACausalActor::NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabber)
 {
 	InteractedComponent = nullptr;
+	InteractingCharacter = nullptr;
 
 	// Remove tick dependency.
 	if (Grabber)

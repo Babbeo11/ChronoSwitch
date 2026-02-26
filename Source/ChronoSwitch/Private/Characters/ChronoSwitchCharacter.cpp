@@ -84,7 +84,7 @@ void AChronoSwitchCharacter::BeginPlay()
 		if (InteractWidget)
 		{
 			InteractWidget->AddToViewport();
-			InteractWidget->SetVisibility(ESlateVisibility::Hidden);
+			InteractWidget->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
 }
@@ -546,19 +546,16 @@ void AChronoSwitchCharacter::OnTickSenseInteractable()
 		FHitResult HitResult;
 		if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
 		{
-			NewSensedActor = ValidateInteractable(HitResult.GetActor());
+			NewSensedActor = ValidateInteractable(HitResult.GetActor(), HitResult.GetComponent());
 		}
 	}
 	
 	// Checks if the SensedActor changed
-	if (NewSensedActor == SensedActor)
-		return;
-	
 	SensedActor = NewSensedActor;
 	UpdateInteractWidget();
 }
 
-AActor* AChronoSwitchCharacter::ValidateInteractable(AActor* HitActor)
+AActor* AChronoSwitchCharacter::ValidateInteractable(AActor* HitActor, UPrimitiveComponent* HitComponent)
 {
 	if (!HitActor)
 		return nullptr;
@@ -566,10 +563,9 @@ AActor* AChronoSwitchCharacter::ValidateInteractable(AActor* HitActor)
 		return nullptr;
 	
 	// Checks if actor is grabbed
-	if (ACausalActor* temp = Cast<ACausalActor>(HitActor))
+	if (ACausalActor* CausalActor = Cast<ACausalActor>(HitActor))
 	{
-		if (temp->IsHeld())
-			return nullptr;
+		return CausalActor->CanBeGrabbed(HitComponent) ? HitActor : nullptr;
 	}
 	return HitActor;
 }
@@ -578,7 +574,7 @@ void AChronoSwitchCharacter::UpdateInteractWidget()
 {
 	if (!SensedActor)
 	{
-		InteractWidget->SetVisibility(ESlateVisibility::Hidden);
+		InteractWidget->SetVisibility(ESlateVisibility::Collapsed);
 		return;
 	}
 	// Only sets Visibility and Text if SensedActor is valid and has changed
