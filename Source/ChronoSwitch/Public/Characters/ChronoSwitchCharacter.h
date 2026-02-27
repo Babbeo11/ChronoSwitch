@@ -193,21 +193,26 @@ protected:
 #pragma endregion
 
 #pragma region Interaction Sensing System
-	
 	/** Stores pointer to actor in front of the player. */
 	UPROPERTY()
 	AActor* SensedActor;
+	
 	/** Checks for interactable objects in front of the player. */
 	void OnTickSenseInteractable();
+	
 	/** Validates new traced candidate*/
 	AActor* ValidateInteractable(AActor* HitActor, UPrimitiveComponent* HitComponent);
+	
 	/** Sets visibility and text values only on SensedActor change*/
 	void UpdateInteractWidget();
+	
 	/** Performs a trace from the camera to find interactable objects in the world. */
 	bool BoxTraceFront(FHitResult& OutHit, const float DrawDistance = 200, const EDrawDebugTrace::Type Type = EDrawDebugTrace::Type::ForDuration);
+	
 #pragma endregion
 	
 #pragma region Player Management
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Timeline")
 	TWeakObjectPtr<class ACharacter> CachedOtherPlayerCharacter;
 	
@@ -225,8 +230,20 @@ protected:
 	
 	/** Handles asymmetrical visibility logic for rendering the other player. */
 	void UpdatePlayerVisibility(AChronoSwitchPlayerState* MyPS, AChronoSwitchPlayerState* OtherPS, float DeltaTime);
-#pragma endregion
+#pragma endregion 
 
+#pragma region Player Movement
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerMovement")
+	float CoyoteTimeWindow;
+	
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PrevCustomMode) override;
+	
+	virtual bool CanJumpInternal_Implementation() const override;
+	
+	virtual void OnJumped_Implementation() override;
+	
+#pragma endregion
+	
 private:
 #pragma region Internal State
 	/** Timer handle for retrying the PlayerState binding if it's not immediately available. */
@@ -241,6 +258,9 @@ private:
 	/** Cached pointer to the dynamic material instance of the other player to avoid casting every frame. */
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> CachedBodyMID;
+	
+	UPROPERTY(Transient)
+	float JumpGraceTimeExpiration;
 
 	/** Reusable array for trace object types to avoid heap allocation every frame. */
 	TArray<TEnumAsByte<EObjectTypeQuery>> ReusableTraceObjectTypes;

@@ -53,6 +53,7 @@ AChronoSwitchCharacter::AChronoSwitchCharacter()
 	CurrentTimelineBlend = 0.0f;
 	CurrentVisibilityBlend = 0.0f;
 	CachedBodyMID = nullptr;
+	CoyoteTimeWindow = 0.15f;
 }
 
 void AChronoSwitchCharacter::BeginPlay()
@@ -899,6 +900,38 @@ void AChronoSwitchCharacter::UpdatePlayerVisibility(AChronoSwitchPlayerState* My
 			}
 		}
 	}
+}
+
+
+
+#pragma endregion
+
+#pragma region Player Movement
+void AChronoSwitchCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PrevCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PrevCustomMode);
+	
+	if (PrevMovementMode == MOVE_Walking && GetCharacterMovement()->MovementMode == MOVE_Falling)
+	{
+		if (GetVelocity().Z <= 0.0f)
+		{
+			JumpGraceTimeExpiration = GetWorld()->GetTimeSeconds() + CoyoteTimeWindow;
+		}
+	}
+}
+
+bool AChronoSwitchCharacter::CanJumpInternal_Implementation() const
+{
+	if (Super::CanJumpInternal_Implementation()) return true;
+	
+	return GetWorld()->GetTimeSeconds() < JumpGraceTimeExpiration;
+}
+
+void AChronoSwitchCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+	
+	JumpGraceTimeExpiration = 0.0f;
 }
 
 #pragma endregion
