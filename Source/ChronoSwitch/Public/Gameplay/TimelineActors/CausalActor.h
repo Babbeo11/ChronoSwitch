@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "TimelineBaseActor.h"
+#include "PhysicsTimelineActor.h"
 #include "GameFramework/Actor.h"
 #include "CausalActor.generated.h"
 
@@ -17,7 +17,7 @@
  * - Ghost Visualization: Displays a visual cue when the two meshes desynchronize due to obstacles.
  */
 UCLASS()
-class CHRONOSWITCH_API ACausalActor : public ATimelineBaseActor
+class CHRONOSWITCH_API ACausalActor : public APhysicsTimelineActor
 {
 	GENERATED_BODY()
 
@@ -33,11 +33,10 @@ public:
 	virtual void NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabber) override;
 
 	/** Checks if the specific component can be grabbed (e.g., prevents grabbing Future if Past is held). */
-	bool CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const;
+	virtual bool CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const override;
 
 protected:
 	virtual void BeginPlay() override;
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 public:
 	virtual void Tick(float DeltaTime) override;
@@ -67,26 +66,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Physics")
 	float SpringDamping;
 
-	// --- State ---
-
-	/** The component currently being held by a player, if any. Replicated to sync state. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_InteractedComponent, Category = "Causal State")
-	TObjectPtr<UPrimitiveComponent> InteractedComponent;
-
-	/** The character currently holding this actor. Replicated to handle state changes. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Causal State")
-	TObjectPtr<ACharacter> InteractingCharacter;
-
-	/** Handles changes to the interaction state on clients. */
-	UFUNCTION()
-	void OnRep_InteractedComponent();
-
 private:
 	/** Updates the position of the FutureMesh based on the PastMesh's state. */
 	void UpdateSlaveMesh(float DeltaTime);
 
 	/** Updates the visibility and location of the GhostMesh based on desync distance. */
-	void UpdateGhostVisuals();
+	void UpdateGhostVisuals() const;
 
 	/** Tracks the velocity of the FutureMesh during kinematic movement to apply upon release. */
 	FVector FutureMeshVelocity;

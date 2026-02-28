@@ -14,7 +14,7 @@
 #include "Interfaces/Interactable.h"
 #include "Net/UnrealNetwork.h"
 #include "Gameplay/TimelineActors/TimelineBaseActor.h"
-#include "Gameplay/TimelineActors/CausalActor.h"
+#include "Gameplay/TimelineActors/PhysicsTimelineActor.h"
 #include "UI/InteractPromptWidget.h"
 
 #pragma region Lifecycle
@@ -262,10 +262,10 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 	// Trace against the correct Timeline channel.
 	if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
 	{
-		// Validate CausalActor specific logic (e.g., prevent grabbing Future if Past is held).
-		if (ACausalActor* CausalActor = Cast<ACausalActor>(HitResult.GetActor()))
+		// Validate PhysicsTimelineActor logic (e.g., check if already held or priority logic).
+		if (APhysicsTimelineActor* PhysicsActor = Cast<APhysicsTimelineActor>(HitResult.GetActor()))
 		{
-			if (!CausalActor->CanBeGrabbed(HitResult.GetComponent()))
+			if (!PhysicsActor->CanBeGrabbed(HitResult.GetComponent()))
 			{
 				return;
 			}
@@ -564,9 +564,9 @@ AActor* AChronoSwitchCharacter::ValidateInteractable(AActor* HitActor, UPrimitiv
 		return nullptr;
 	
 	// Checks if actor is grabbed
-	if (ACausalActor* CausalActor = Cast<ACausalActor>(HitActor))
+	if (APhysicsTimelineActor* PhysicsActor = Cast<APhysicsTimelineActor>(HitActor))
 	{
-		return CausalActor->CanBeGrabbed(HitComponent) ? HitActor : nullptr;
+		return PhysicsActor->CanBeGrabbed(HitComponent) ? HitActor : nullptr;
 	}
 	return HitActor;
 }

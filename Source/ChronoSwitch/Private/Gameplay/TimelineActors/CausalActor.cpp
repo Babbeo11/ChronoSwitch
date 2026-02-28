@@ -3,7 +3,6 @@
 #include "Gameplay/TimelineActors/CausalActor.h"
 #include "Characters/ChronoSwitchCharacter.h"
 #include "Components/StaticMeshComponent.h"
-#include "Net/UnrealNetwork.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
@@ -11,7 +10,6 @@
 
 ACausalActor::ACausalActor()
 {
-	// Enable ticking to handle physics synchronization.
 	PrimaryActorTick.bCanEverTick = true;
 	
 	// Update BEFORE physics to ensure passengers can react to the moving base in the same frame.
@@ -19,8 +17,6 @@ ACausalActor::ACausalActor()
 	
 	// High priority for replication as this is an interactive physics object.
 	NetPriority = 5.0f;
-
-	// Force the actor timeline mode to exist in both timelines (Causal).
 	ActorTimeline = EActorTimeline::Both_Causal;
 
 	// Physics Defaults
@@ -49,8 +45,6 @@ ACausalActor::ACausalActor()
 
 		PastMesh->SetSimulatePhysics(true);
 		PastMesh->SetEnableGravity(true);
-
-		AActor::SetReplicateMovement(true);
 	}
 	
 	// Configure Future Mesh (Slave)
@@ -62,53 +56,28 @@ ACausalActor::ACausalActor()
 
 		// Note: FutureMesh movement is driven locally by logic, not directly replicated.
 	}
-	
-	bReplicates = true;
 }
 
-void ACausalActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(ACausalActor, InteractedComponent);
-	DOREPLIFETIME(ACausalActor, InteractingCharacter);
-}
-
-void ACausalActor::OnRep_InteractedComponent()
-{
-	// Trigger interaction logic on clients when the state changes.
-	if (InteractedComponent)
-	{
-		NotifyOnGrabbed(InteractedComponent, nullptr); 
-	}
-	else
-	{
-		NotifyOnReleased(nullptr, nullptr);
-	}
-}
 
 void ACausalActor::BeginPlay()
 {
 	Super::BeginPlay();
 	
 	// Detach FutureMesh from PastMesh at startup.
-	// This ensures FutureMesh is driven purely by custom logic (UpdateSlaveMesh) rather than scene hierarchy inheritance.
 	if (FutureMesh)
 	{
 		FutureMesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
 	}
 	
 	// Ensure physics settings are correct at runtime start.
-	if (HasAuthority())
-	{
-		if (PastMesh) PastMesh->SetSimulatePhysics(true);
-		if (FutureMesh) FutureMesh->SetSimulatePhysics(true);
-	}
+	if (PastMesh) PastMesh->SetSimulatePhysics(true);
+	if (FutureMesh) FutureMesh->SetSimulatePhysics(true);
 }
 
 void ACausalActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
+	
 	UpdateSlaveMesh(DeltaTime);
 	UpdateGhostVisuals();
 }
@@ -152,9 +121,11 @@ bool ACausalActor::CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const
 		return true;
 	}
 
-	// Priority Logic: A grab on the PastMesh always succeeds, even if the FutureMesh is held.
+	// Priority Logic: A grab on the PastMesh succeeds ONLY if the FutureMesh is held (Steal).
+	// If PastMesh is already held, we cannot steal it.
 	if (MeshToGrab == PastMesh)
 	{
+		if (InteractedComponent == PastMesh) return false;
 		return true;
 	}
 
@@ -173,15 +144,9 @@ void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabbe
 		}
 	}
 	
-	InteractedComponent = Mesh;
-
-	// Ensure this actor ticks AFTER the character holding it to prevent vertical jitter (1-frame lag).
-	if (Grabber)
-	{
-		AddTickPrerequisiteActor(Grabber);
-	}
-	
-	InteractingCharacter = Grabber;
+	// Call base implementation to handle state assignment and tick prerequisites.
+	// NOTE: Must be called AFTER the force drop logic above, otherwise InteractedComponent is overwritten.
+	Super::NotifyOnGrabbed(Mesh, Grabber);
 
 	// If PastMesh is grabbed, FutureMesh must become kinematic to follow it precisely.
 	if (FutureMesh && Mesh == PastMesh)
@@ -194,14 +159,8 @@ void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabbe
 
 void ACausalActor::NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabber)
 {
-	InteractedComponent = nullptr;
-	InteractingCharacter = nullptr;
-
-	// Remove tick dependency.
-	if (Grabber)
-	{
-		RemoveTickPrerequisiteActor(Grabber);
-	}
+	// Call base implementation to handle state cleanup.
+	Super::NotifyOnReleased(Mesh, Grabber);
 
 	// Restore FutureMesh to physics mode.
 	if (FutureMesh)
@@ -237,22 +196,21 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 
 		// Ignore collision with players standing on the mesh.
 		// This allows the mesh to move UP into them, letting their CharacterMovementComponent resolve the lift.
-		// Iterate over PlayerArray instead of all world actors.
 		if (AGameStateBase* GameState = GetWorld()->GetGameState())
 		{
 			for (APlayerState* PS : GameState->PlayerArray)
 			{
 				if (ACharacter* Char = Cast<ACharacter>(PS->GetPawn()))
 				{
-						// Geometric Check: Ensure player is physically ABOVE the mesh, not just touching it from side/bottom.
-						const float CharBottomZ = Char->GetActorLocation().Z - Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-						const FBoxSphereBounds MeshBounds = FutureMesh->CalcBounds(FutureMesh->GetComponentTransform());
-						const float MeshTopZ = MeshBounds.Origin.Z + MeshBounds.BoxExtent.Z;
+					// Geometric Check: Ensure player is physically ABOVE the mesh, not just touching it from side/bottom.
+					const float CharBottomZ = Char->GetActorLocation().Z - Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+					const FBoxSphereBounds MeshBounds = FutureMesh->CalcBounds(FutureMesh->GetComponentTransform());
+					const float MeshTopZ = MeshBounds.Origin.Z + MeshBounds.BoxExtent.Z;
 						
-						// Tolerance (e.g. 15 units) allows for slight penetration or step-downs, but rejects side/bottom hits.
-						const bool bIsPhysicallyAbove = CharBottomZ >= (MeshTopZ - 15.0f);
+					// Tolerance (e.g. 15 units) allows for slight penetration or step-downs, but rejects side/bottom hits.
+					const bool bIsPhysicallyAbove = CharBottomZ >= (MeshTopZ - 15.0f);
 
-						if (Char->GetMovementBase() == FutureMesh && bIsPhysicallyAbove && bIsLifting)
+					if (Char->GetMovementBase() == FutureMesh && bIsPhysicallyAbove && bIsLifting)
 					{
 						FutureMesh->IgnoreActorWhenMoving(Char, true);
 					}
@@ -375,7 +333,7 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 	}
 }
 
-void ACausalActor::UpdateGhostVisuals()
+void ACausalActor::UpdateGhostVisuals() const
 {
 	if (!GhostMesh || !PastMesh || !FutureMesh) return;
 
