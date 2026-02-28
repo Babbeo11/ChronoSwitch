@@ -7,6 +7,8 @@
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/PlayerState.h"
+#include "Physics/PhysicsInterfaceCore.h"
+#include "Chaos/ChaosEngineInterface.h"
 
 ACausalActor::ACausalActor()
 {
@@ -21,9 +23,11 @@ ACausalActor::ACausalActor()
 
 	// Physics Defaults
 	DesyncThreshold = 50.0f;
-	MaxAllowedDistance = 20.0f; 
 	SpringStiffness = 30.0f;    
 	SpringDamping = 5.0f;
+	MaxPullDistance = 1000.0f;
+	HeldInterpSpeed = 20.0f;
+	LiftVerticalTolerance = 15.0f;
 	InteractedComponent = nullptr;
 	FutureMeshVelocity = FVector::ZeroVector;
 	InteractingCharacter = nullptr;
@@ -52,6 +56,7 @@ ACausalActor::ACausalActor()
 	{
 		FutureMesh->SetSimulatePhysics(true);
 		FutureMesh->SetEnableGravity(true);
+		FutureMesh->SetIsReplicated(false);
 		FutureMesh->BodyInstance.bUseCCD = true; 
 
 		// Note: FutureMesh movement is driven locally by logic, not directly replicated.
@@ -72,6 +77,7 @@ void ACausalActor::BeginPlay()
 	// Ensure physics settings are correct at runtime start.
 	if (PastMesh) PastMesh->SetSimulatePhysics(true);
 	if (FutureMesh) FutureMesh->SetSimulatePhysics(true);
+	
 }
 
 void ACausalActor::Tick(float DeltaTime)
@@ -194,34 +200,42 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 		const FVector MoveDelta = TargetLocation - CurrentLoc;
 		const bool bIsLifting = MoveDelta.Z > 0.1f;
 
-		// Ignore collision with players standing on the mesh.
-		// This allows the mesh to move UP into them, letting their CharacterMovementComponent resolve the lift.
-		if (AGameStateBase* GameState = GetWorld()->GetGameState())
+		// Optimization: Only iterate over players if we are actually lifting (moving up).
+		if (bIsLifting)
 		{
-			for (APlayerState* PS : GameState->PlayerArray)
+			// Ignore collision with players standing on the mesh.
+			// This allows the mesh to move UP into them, letting their CharacterMovementComponent resolve the lift.
+			if (AGameStateBase* GameState = GetWorld()->GetGameState())
 			{
-				if (ACharacter* Char = Cast<ACharacter>(PS->GetPawn()))
+				for (APlayerState* PS : GameState->PlayerArray)
 				{
-					// Geometric Check: Ensure player is physically ABOVE the mesh, not just touching it from side/bottom.
-					const float CharBottomZ = Char->GetActorLocation().Z - Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-					const FBoxSphereBounds MeshBounds = FutureMesh->CalcBounds(FutureMesh->GetComponentTransform());
-					const float MeshTopZ = MeshBounds.Origin.Z + MeshBounds.BoxExtent.Z;
-						
-					// Tolerance (e.g. 15 units) allows for slight penetration or step-downs, but rejects side/bottom hits.
-					const bool bIsPhysicallyAbove = CharBottomZ >= (MeshTopZ - 15.0f);
-
-					if (Char->GetMovementBase() == FutureMesh && bIsPhysicallyAbove && bIsLifting)
+					if (ACharacter* Char = Cast<ACharacter>(PS->GetPawn()))
 					{
-						FutureMesh->IgnoreActorWhenMoving(Char, true);
+						// Geometric Check: Ensure player is physically ABOVE the mesh, not just touching it from side/bottom.
+						const float CharBottomZ = Char->GetActorLocation().Z - Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+						const FBoxSphereBounds MeshBounds = FutureMesh->CalcBounds(FutureMesh->GetComponentTransform());
+						const float MeshTopZ = MeshBounds.Origin.Z + MeshBounds.BoxExtent.Z;
+							
+						// Tolerance (e.g. 15 units) allows for slight penetration or step-downs, but rejects side/bottom hits.
+						const bool bIsPhysicallyAbove = CharBottomZ >= (MeshTopZ - LiftVerticalTolerance);
+
+						if (Char->GetMovementBase() == FutureMesh && bIsPhysicallyAbove)
+						{
+							FutureMesh->IgnoreActorWhenMoving(Char, true);
+						}
 					}
 				}
 			}
 		}
 		
-		FHitResult Hit;
-		FutureMesh->SetWorldLocationAndRotation(TargetLocation, TargetRotation, true, &Hit);
+		// Smoothly interpolate towards the target to prevent teleporting when unblocked.
+		const FVector NextLoc = FMath::VInterpTo(CurrentLoc, TargetLocation, DeltaTime, HeldInterpSpeed);
+		const FRotator NextRot = FMath::RInterpTo(FutureMesh->GetComponentRotation(), TargetRotation, DeltaTime, HeldInterpSpeed);
 
-		if (DeltaTime > KINDA_SMALL_NUMBER)
+		FHitResult Hit;
+		FutureMesh->SetWorldLocationAndRotation(NextLoc, NextRot, true, &Hit);
+
+		if (DeltaTime > UE_KINDA_SMALL_NUMBER)
 		{
 			FutureMeshVelocity = (FutureMesh->GetComponentLocation() - CurrentLoc) / DeltaTime;
 		}
@@ -230,106 +244,85 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 		FutureMesh->ClearMoveIgnoreActors();
 	}
 	// Case 2: Object is free (Released).
-	// FutureMesh uses physics forces to follow PastMesh, respecting gravity and collisions.
-	else if (InteractedComponent == nullptr)
+	// Use AddCustomPhysics to run spring logic on the Physics Thread for stability.
+	else if (InteractedComponent == nullptr && FutureMesh)
 	{
-		const FVector CurrentLocation = FutureMesh->GetComponentLocation();
-		const float Distance = FVector::Dist(TargetLocation, CurrentLocation);
-
-		// Only apply correction forces if the mesh has drifted beyond the allowed threshold.
-		if (Distance > MaxAllowedDistance)
+		if (FBodyInstance* BodyInst = FutureMesh->GetBodyInstance())
 		{
-			FVector Delta = TargetLocation - CurrentLocation;
+			// Capture parameters by value for thread safety.
+			float Stiffness = SpringStiffness;
+			float Damping = SpringDamping;
+			float MaxDist = MaxPullDistance;
 			
-			// Clamp the pull vector to prevent excessive force generation when far away.
-			const float MaxPullDistance = 1000.0f;
-			if (Delta.SizeSquared() > MaxPullDistance * MaxPullDistance)
+			// Capture Master's BodyInstance to read real-time physics state on the Physics Thread.
+			FBodyInstance* MasterBodyInst = PastMesh ? PastMesh->GetBodyInstance() : nullptr;
+			FVector FallbackTarget = TargetLocation;
+			FQuat FallbackRotation = TargetRotation.Quaternion();
+
+			FCalculateCustomPhysics CalculateCustomPhysics = FCalculateCustomPhysics::CreateLambda([Stiffness, Damping, MaxDist, MasterBodyInst, FallbackTarget, FallbackRotation](float PhysicsDeltaTime, FBodyInstance* BI)
 			{
-				Delta = Delta.GetSafeNormal() * MaxPullDistance;
-			}
-			
-			FVector GravityComp = FVector::ZeroVector;
-			FVector VelocityForDamping = FutureMesh->GetComponentVelocity(); 
+				if (!BI || !BI->IsValidBodyInstance()) return;
 
-			// --- Obstacle Detection ---
-			FHitResult Hit;
-			FCollisionQueryParams Params;
-			Params.AddIgnoredActor(this);
+				// Get physics state safely (Thread-safe)
+				const FTransform BodyTransform = BI->GetUnrealWorldTransform_AssumesLocked();
+				const FVector CurrentLocation = BodyTransform.GetLocation();
+				const FVector CurrentVelocity = BI->GetUnrealWorldVelocity_AssumesLocked();
 
-			// Construct query params once.
-			static const FCollisionObjectQueryParams ObjectParams = []()
-			{
-				FCollisionObjectQueryParams P;
-				P.AddObjectTypesToQuery(ECC_WorldStatic);
-				P.AddObjectTypesToQuery(ECC_WorldDynamic);
-				P.AddObjectTypesToQuery(ECC_PhysicsBody);
-				return P;
-			}();
-			
-			// Sweep towards the target to detect walls or floors.
-			bool bBlocked = GetWorld()->SweepSingleByObjectType(
-				Hit,
-				CurrentLocation,
-				CurrentLocation + (Delta.GetSafeNormal() * 10.0f), // Short sweep
-				FQuat::Identity,
-				ObjectParams,
-				FutureMesh->GetCollisionShape(),
-				Params
-			);
+				// Determine Target from Master's real-time state to avoid lag.
+				FVector RealTimeTarget = FallbackTarget;
+				FQuat RealTimeRotation = FallbackRotation;
+				FVector RealTimeLinearVelocity = FVector::ZeroVector;
+				FVector RealTimeAngularVelocity = FVector::ZeroVector;
 
-			if (bBlocked)
-			{
-				const float NormalProj = Delta | Hit.ImpactNormal;
-
-				// Determine if we hit a Wall (Vertical) or Floor (Horizontal).
-				if (Hit.ImpactNormal.Z < 0.7f)
+				if (MasterBodyInst && MasterBodyInst->IsValidBodyInstance())
 				{
-					// --- WALL LOGIC (Sticky) ---
-					// If pulling INTO the wall, lock the object to prevent sliding.
-					if (NormalProj < 0.0f)
-					{
-						// Remove tangential pull force.
-						Delta = Hit.ImpactNormal * NormalProj;
-
-						// Counteract gravity to hold position.
-						if (FutureMesh->IsGravityEnabled())
-						{
-							GravityComp = FVector(0.0f, 0.0f, -GetWorld()->GetGravityZ());
-						}
-
-						// Kill tangential velocity (Infinite Friction).
-						const FVector NormalVel = Hit.ImpactNormal * (VelocityForDamping | Hit.ImpactNormal);
-						FutureMesh->SetPhysicsLinearVelocity(NormalVel);
-						
-						// Update damping velocity to avoid erroneous upward force.
-						VelocityForDamping = NormalVel;
-					}
+					FTransform MasterTransform = MasterBodyInst->GetUnrealWorldTransform_AssumesLocked();
+					RealTimeTarget = MasterTransform.GetLocation();
+					RealTimeRotation = MasterTransform.GetRotation();
+					RealTimeLinearVelocity = MasterBodyInst->GetUnrealWorldVelocity_AssumesLocked();
+					RealTimeAngularVelocity = MasterBodyInst->GetUnrealWorldAngularVelocityInRadians_AssumesLocked();
 				}
-				else
+
+				// Calculate Spring Force
+				FVector Delta = RealTimeTarget - CurrentLocation;
+				
+				if (Delta.SizeSquared() > MaxDist * MaxDist)
 				{
-					// --- FLOOR LOGIC (Sliding) ---
-					// Allow sliding along the floor by removing only the downward pull component.
-					if (NormalProj < 0.0f)
-					{
-						Delta -= Hit.ImpactNormal * NormalProj;
-					}
+					Delta = Delta.GetSafeNormal() * MaxDist;
 				}
-			}
-		
-			// Calculate Spring Force 
-			const FVector SpringForce = Delta * SpringStiffness;
-		
-			// Calculate Damping Force 
-			const FVector DampingForce = -VelocityForDamping * SpringDamping;
-		
-			const FVector TotalForce = SpringForce + DampingForce + GravityComp;
 
-			// Apply the net force to the physics body.
-			FutureMesh->AddForce(TotalForce, NAME_None, true); // true = Acceleration change (mass independent)
+				const FVector SpringForce = Delta * Stiffness;
+				// Damping based on RELATIVE velocity prevents drag when matching speed.
+				const FVector DampingForce = -(CurrentVelocity - RealTimeLinearVelocity) * Damping;
+				
+				const FVector TotalForce = SpringForce + DampingForce;
+
+				// Apply Force on Physics Thread (bAccelChange=true, bWake=true)
+				// We use bAccelChange=true (Acceleration) to make the spring independent of mass.
+				FPhysicsInterface::AddForce_AssumesLocked(BI->GetPhysicsActorHandle(), TotalForce, true, true);
+
+				// --- Angular Spring (Torque) ---
+				
+				const FQuat CurrentRotation = BodyTransform.GetRotation();
+				
+				// Calculate error quaternion (difference between target and current)
+				FQuat ErrorRot = RealTimeRotation * CurrentRotation.Inverse();
+				FVector Axis;
+				float Angle;
+				ErrorRot.ToAxisAndAngle(Axis, Angle);
+
+				// Normalize angle.
+				if (Angle > UE_PI) Angle -= 2.0f * UE_PI;
+				
+				// Apply Torque: Stiffness * Angle - Damping * AngularVelocity
+				const FVector AngularVelocity = BI->GetUnrealWorldAngularVelocityInRadians_AssumesLocked();
+				const FVector Torque = (Axis * Angle * Stiffness) - ((AngularVelocity - RealTimeAngularVelocity) * Damping);
+				
+				FPhysicsInterface::AddTorque_AssumesLocked(BI->GetPhysicsActorHandle(), Torque, true, true);
+			});
+
+			BodyInst->AddCustomPhysics(CalculateCustomPhysics);
 		}
-
-		// Always sync rotation directly for stability.
-		FutureMesh->SetWorldRotation(TargetRotation);
 	}
 }
 

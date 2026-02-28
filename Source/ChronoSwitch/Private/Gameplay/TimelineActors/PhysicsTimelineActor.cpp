@@ -7,7 +7,7 @@
 
 APhysicsTimelineActor::APhysicsTimelineActor()
 {
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 
 	// High priority for replication as this is an interactive physics object.
@@ -22,6 +22,11 @@ APhysicsTimelineActor::APhysicsTimelineActor()
 	// Ensure movement is replicated for physics sync.
 	bReplicates = true;
 	AActor::SetReplicateMovement(true);
+	SetNetUpdateFrequency(30.0f);
+	SetMinNetUpdateFrequency(2.0f);
+	NetDormancy = DORM_Awake;
+	SetPhysicsReplicationMode(EPhysicsReplicationMode::PredictiveInterpolation);
+	
 	
 	// Default behavior: PastMesh is the Root (Standard for PastOnly and CausalActor).
 	if (PastMesh)

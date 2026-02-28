@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "PhysicsTimelineActor.h"
-#include "GameFramework/Actor.h"
 #include "CausalActor.generated.h"
 
 /**
@@ -16,7 +15,7 @@
  * - Physics Sync: When released, the FutureMesh uses spring forces to follow the PastMesh, allowing for physical interactions (gravity, collisions).
  * - Ghost Visualization: Displays a visual cue when the two meshes desynchronize due to obstacles.
  */
-UCLASS()
+UCLASS(meta = (PrioritizeCategories = "Causal Settings"))
 class CHRONOSWITCH_API ACausalActor : public APhysicsTimelineActor
 {
 	GENERATED_BODY()
@@ -45,26 +44,34 @@ protected:
 	// --- Components ---
 
 	/** Visual-only mesh that appears when the Past and Future meshes desynchronize. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Causal Settings|Visuals")
 	TObjectPtr<UStaticMeshComponent> GhostMesh;
 
 	// --- Physics Configuration ---
 
 	/** Distance threshold (in units) between Past and Future meshes before the Ghost appears. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Physics")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Visuals")
 	float DesyncThreshold;
 	
-	/** Distance threshold (in units) before the spring force activates to pull the meshes together. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Physics")
-	float MaxAllowedDistance;
-
-	/** Strength of the spring force pulling the FutureMesh towards the PastMesh. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Physics")
+	/** Strength of the spring force (acceleration) pulling the FutureMesh towards the PastMesh. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Physics")
 	float SpringStiffness;
 
-	/** Damping factor to reduce oscillation when the FutureMesh moves towards the PastMesh. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Physics")
+	/** Damping factor to prevent oscillation and overshoot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Physics")
 	float SpringDamping;
+
+	/** Maximum distance (in units) the spring force considers. Prevents excessive force generation when far away. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Physics")
+	float MaxPullDistance;
+
+	/** Interpolation speed for the FutureMesh when the PastMesh is held. Controls how fast it snaps to the target. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Interaction")
+	float HeldInterpSpeed;
+
+	/** Vertical tolerance (in units) to detect if a player is standing on top of the mesh for lifting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Interaction")
+	float LiftVerticalTolerance;
 
 private:
 	/** Updates the position of the FutureMesh based on the PastMesh's state. */
