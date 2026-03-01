@@ -36,6 +36,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 public:
 	virtual void Tick(float DeltaTime) override;
@@ -65,6 +66,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Physics")
 	float MaxPullDistance;
 
+	/** Maximum acceleration (cm/s^2) applied by the spring. Clamping this prevents physics tunneling through walls. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Physics")
+	float MaxAcceleration;
+
+	/** Maximum velocity (cm/s) the object can reach. Capping this prevents tunneling through walls at high speeds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Physics")
+	float MaxVelocity;
+
 	/** Interpolation speed for the FutureMesh when the PastMesh is held. Controls how fast it snaps to the target. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Interaction")
 	float HeldInterpSpeed;
@@ -72,6 +81,10 @@ protected:
 	/** Vertical tolerance (in units) to detect if a player is standing on top of the mesh for lifting. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Causal Settings|Interaction")
 	float LiftVerticalTolerance;
+
+	/** The character currently holding the FutureMesh. Tracked separately from the base InteractingCharacter (which tracks PastMesh). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Causal State")
+	TObjectPtr<ACharacter> FutureInteractingCharacter;
 
 private:
 	/** Updates the position of the FutureMesh based on the PastMesh's state. */

@@ -1,13 +1,13 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Gameplay/TimelineActors/CausalActor.h"
-#include "Characters/ChronoSwitchCharacter.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Physics/PhysicsInterfaceCore.h"
+#include "Net/UnrealNetwork.h"
 #include "Chaos/ChaosEngineInterface.h"
 
 ACausalActor::ACausalActor()
@@ -25,12 +25,15 @@ ACausalActor::ACausalActor()
 	DesyncThreshold = 50.0f;
 	SpringStiffness = 30.0f;    
 	SpringDamping = 5.0f;
-	MaxPullDistance = 1000.0f;
+	MaxPullDistance = 800.0f;
+	MaxAcceleration = 8000.0f; 
+	MaxVelocity = 1500.0f; 
 	HeldInterpSpeed = 20.0f;
 	LiftVerticalTolerance = 15.0f;
 	InteractedComponent = nullptr;
 	FutureMeshVelocity = FVector::ZeroVector;
 	InteractingCharacter = nullptr;
+	FutureInteractingCharacter = nullptr;
 	
 	// Configure Ghost Mesh
 	GhostMesh = CreateDefaultSubobject<UStaticMeshComponent>("GhostMesh");
@@ -49,6 +52,7 @@ ACausalActor::ACausalActor()
 
 		PastMesh->SetSimulatePhysics(true);
 		PastMesh->SetEnableGravity(true);
+		PastMesh->BodyInstance.bUseCCD = true; 
 	}
 	
 	// Configure Future Mesh (Slave)
@@ -63,6 +67,11 @@ ACausalActor::ACausalActor()
 	}
 }
 
+void ACausalActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ACausalActor, FutureInteractingCharacter);
+}
 
 void ACausalActor::BeginPlay()
 {
@@ -99,21 +108,10 @@ FText ACausalActor::GetInteractPrompt_Implementation()
 	const APlayerController* PC = GetWorld()->GetFirstPlayerController();
 	const APawn* LocalPawn = PC ? PC->GetPawn() : nullptr;
 	
-	if (InteractedComponent)
+	// Check if we are holding either part of the actor.
+	if (InteractingCharacter == LocalPawn || FutureInteractingCharacter == LocalPawn)
 	{
-		if (InteractingCharacter == LocalPawn)
-		{
-			return FText::FromString("Press F to Release");
-		}
-		// If they are already holding the PastMesh (Priority), we cannot steal it.
-		if (InteractedComponent == PastMesh)
-		{
-			// Already held by someone with max priority. Cannot grab.
-			return FText();
-		}
-			
-		// If they hold FutureMesh, we can steal it by grabbing PastMesh.
-		return FText::FromString("Press F to Grab");
+		return FText::FromString("Press F to Release");
 	}
 
 	return FText::FromString("Press F to Grab");
@@ -121,66 +119,93 @@ FText ACausalActor::GetInteractPrompt_Implementation()
 
 bool ACausalActor::CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const
 {
-	// If no one is holding it, it can be grabbed.
-	if (!InteractedComponent)
-	{
-		return true;
-	}
-
-	// Priority Logic: A grab on the PastMesh succeeds ONLY if the FutureMesh is held (Steal).
-	// If PastMesh is already held, we cannot steal it.
+	// Allow independent grabbing.
 	if (MeshToGrab == PastMesh)
 	{
-		if (InteractedComponent == PastMesh) return false;
-		return true;
+		// Can grab PastMesh if it's not already held (InteractedComponent tracks PastMesh).
+		return InteractedComponent == nullptr;
 	}
-
-	// Otherwise (trying to grab FutureMesh), the grab fails if anything is already held.
+	if (MeshToGrab == FutureMesh)
+	{
+		// Can grab FutureMesh if it's not already held.
+		return FutureInteractingCharacter == nullptr;
+	}
+	
 	return false;
 }
 
 void ACausalActor::NotifyOnGrabbed(UPrimitiveComponent* Mesh, ACharacter* Grabber)
 {
-	// If the PastMesh is being grabbed while the FutureMesh is held by another player, force the other player to release.
-	if (InteractedComponent && InteractingCharacter && InteractingCharacter != Grabber)
+	if (Mesh == FutureMesh)
 	{
-		if (AChronoSwitchCharacter* OtherChar = Cast<AChronoSwitchCharacter>(InteractingCharacter))
+		// Track Future holder separately.
+		FutureInteractingCharacter = Grabber;
+		
+		// Manually add tick dependency since we aren't calling Super for FutureMesh.
+		if (Grabber)
 		{
-			OtherChar->Release();
+			AddTickPrerequisiteActor(Grabber);
 		}
 	}
-	
-	// Call base implementation to handle state assignment and tick prerequisites.
-	// NOTE: Must be called AFTER the force drop logic above, otherwise InteractedComponent is overwritten.
-	Super::NotifyOnGrabbed(Mesh, Grabber);
-
-	// If PastMesh is grabbed, FutureMesh must become kinematic to follow it precisely.
-	if (FutureMesh && Mesh == PastMesh)
+	else if (Mesh == PastMesh)
 	{
-		FutureMesh->SetSimulatePhysics(false);
-		FutureMesh->SetEnableGravity(false);
-		FutureMeshVelocity = FVector::ZeroVector;
+		// Call base implementation to handle state assignment (InteractedComponent) for PastMesh.
+		Super::NotifyOnGrabbed(Mesh, Grabber);
+
+		// If PastMesh is grabbed, FutureMesh must become kinematic to follow it precisely (Case 1).
+		// UNLESS FutureMesh is also held by a player, in which case that player controls it.
+		if (FutureMesh && !FutureInteractingCharacter)
+		{
+			FutureMesh->SetSimulatePhysics(false);
+			FutureMesh->SetEnableGravity(false);
+			FutureMeshVelocity = FVector::ZeroVector;
+		}
 	}
 }
 
 void ACausalActor::NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabber)
 {
-	// Call base implementation to handle state cleanup.
-	Super::NotifyOnReleased(Mesh, Grabber);
-
-	// Restore FutureMesh to physics mode.
-	if (FutureMesh)
+	if (Mesh == FutureMesh)
 	{
-		FutureMesh->SetSimulatePhysics(true);
-		FutureMesh->SetEnableGravity(true);
-
-		// Apply calculated velocity to preserve momentum based on actual movement (respecting collisions).
-		FutureMesh->SetPhysicsLinearVelocity(FutureMeshVelocity);
-
-		// Preserve angular momentum from PastMesh (rotation is synced directly).
-		if (PastMesh)
+		FutureInteractingCharacter = nullptr;
+		if (Grabber)
 		{
-			FutureMesh->SetPhysicsAngularVelocityInDegrees(PastMesh->GetPhysicsAngularVelocityInDegrees());
+			RemoveTickPrerequisiteActor(Grabber);
+		}
+		
+		// We don't immediately restore physics here because UpdateSlaveMesh will handle state
+		// based on whether PastMesh is held (Case 1) or free (Case 2).
+	}
+	else if (Mesh == PastMesh)
+	{
+		// Call base implementation to handle state cleanup for PastMesh.
+		Super::NotifyOnReleased(Mesh, Grabber);
+	}
+
+	// Restore FutureMesh to physics mode ONLY if it is not held by anyone.
+	if (FutureMesh && !FutureInteractingCharacter)
+	{
+		// Check if PastMesh is held (Case 1). If so, FutureMesh must remain kinematic to follow smoothly.
+		if (InteractedComponent == PastMesh)
+		{
+			FutureMesh->SetSimulatePhysics(false);
+			FutureMesh->SetEnableGravity(false);
+			FutureMeshVelocity = FVector::ZeroVector;
+		}
+		else
+		{
+			// Case 2: Past is free. Future uses physics spring.
+			FutureMesh->SetSimulatePhysics(true);
+			FutureMesh->SetEnableGravity(true);
+
+			// Apply calculated velocity to preserve momentum based on actual movement (respecting collisions).
+			FutureMesh->SetPhysicsLinearVelocity(FutureMeshVelocity);
+
+			// Preserve angular momentum from PastMesh (rotation is synced directly).
+			if (PastMesh)
+			{
+				FutureMesh->SetPhysicsAngularVelocityInDegrees(PastMesh->GetPhysicsAngularVelocityInDegrees());
+			}
 		}
 	}
 }
@@ -188,6 +213,10 @@ void ACausalActor::NotifyOnReleased(UPrimitiveComponent* Mesh, ACharacter* Grabb
 void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 {
 	if (!PastMesh || !FutureMesh) return;
+
+	// If FutureMesh is held by a player, they have full control. 
+	// Disable Master-Slave logic so we don't fight the player's movement.
+	if (FutureInteractingCharacter) return;
 
 	const FVector TargetLocation = PastMesh->GetComponentLocation();
 	const FRotator TargetRotation = PastMesh->GetComponentRotation();
@@ -253,20 +282,21 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 			float Stiffness = SpringStiffness;
 			float Damping = SpringDamping;
 			float MaxDist = MaxPullDistance;
+			float MaxAccel = MaxAcceleration;
 			
 			// Capture Master's BodyInstance to read real-time physics state on the Physics Thread.
 			FBodyInstance* MasterBodyInst = PastMesh ? PastMesh->GetBodyInstance() : nullptr;
 			FVector FallbackTarget = TargetLocation;
 			FQuat FallbackRotation = TargetRotation.Quaternion();
 
-			FCalculateCustomPhysics CalculateCustomPhysics = FCalculateCustomPhysics::CreateLambda([Stiffness, Damping, MaxDist, MasterBodyInst, FallbackTarget, FallbackRotation](float PhysicsDeltaTime, FBodyInstance* BI)
+			FCalculateCustomPhysics CalculateCustomPhysics = FCalculateCustomPhysics::CreateLambda([Stiffness, Damping, MaxDist, MaxAccel, MasterBodyInst, FallbackTarget, FallbackRotation](float PhysicsDeltaTime, FBodyInstance* BI)
 			{
 				if (!BI || !BI->IsValidBodyInstance()) return;
 
 				// Get physics state safely (Thread-safe)
 				const FTransform BodyTransform = BI->GetUnrealWorldTransform_AssumesLocked();
 				const FVector CurrentLocation = BodyTransform.GetLocation();
-				const FVector CurrentVelocity = BI->GetUnrealWorldVelocity_AssumesLocked();
+				FVector CurrentVelocity = BI->GetUnrealWorldVelocity_AssumesLocked();
 
 				// Determine Target from Master's real-time state to avoid lag.
 				FVector RealTimeTarget = FallbackTarget;
@@ -297,9 +327,11 @@ void ACausalActor::UpdateSlaveMesh(float DeltaTime)
 				
 				const FVector TotalForce = SpringForce + DampingForce;
 
+				// Clamp the total acceleration to prevent physics explosions/tunneling against walls.
+				const FVector ClampedForce = TotalForce.GetClampedToMaxSize(MaxAccel);
+
 				// Apply Force on Physics Thread (bAccelChange=true, bWake=true)
-				// We use bAccelChange=true (Acceleration) to make the spring independent of mass.
-				FPhysicsInterface::AddForce_AssumesLocked(BI->GetPhysicsActorHandle(), TotalForce, true, true);
+				FPhysicsInterface::AddForce_AssumesLocked(BI->GetPhysicsActorHandle(), ClampedForce, true, true);
 
 				// --- Angular Spring (Torque) ---
 				

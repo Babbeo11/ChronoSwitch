@@ -262,8 +262,10 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 	// Trace against the correct Timeline channel.
 	if (BoxTraceFront(HitResult, ReachDistance, EDrawDebugTrace::None))
 	{
+		APhysicsTimelineActor* PhysicsActor = Cast<APhysicsTimelineActor>(HitResult.GetActor());
+
 		// Validate PhysicsTimelineActor logic (e.g., check if already held or priority logic).
-		if (APhysicsTimelineActor* PhysicsActor = Cast<APhysicsTimelineActor>(HitResult.GetActor()))
+		if (PhysicsActor)
 		{
 			if (!PhysicsActor->CanBeGrabbed(HitResult.GetComponent()))
 			{
@@ -273,8 +275,9 @@ void AChronoSwitchCharacter::Server_Grab_Implementation()
 
 		UPrimitiveComponent* ComponentToGrab = HitResult.GetComponent();
 
-		// Validate that the component exists and simulates physics.
-		if (ComponentToGrab && ComponentToGrab->IsSimulatingPhysics())
+		// Validate that the component exists.
+		// Allow grabbing if it simulates physics OR if it is a PhysicsTimelineActor (which might be temporarily kinematic).
+		if (ComponentToGrab && (ComponentToGrab->IsSimulatingPhysics() || PhysicsActor))
 		{
 			// Prevent grabbing the object we are standing on to avoid physics loops.
 			UPrimitiveComponent* CurrentBase = GetCharacterMovement() ? GetCharacterMovement()->GetMovementBase() : nullptr;

@@ -68,7 +68,8 @@ void APhysicsTimelineActor::OnRep_InteractedComponent()
 	// Trigger interaction logic on clients when the state changes.
 	if (InteractedComponent)
 	{
-		NotifyOnGrabbed(InteractedComponent, nullptr);
+		// Pass the replicated character so we don't overwrite it with nullptr in NotifyOnGrabbed
+		NotifyOnGrabbed(InteractedComponent, InteractingCharacter);
 	}
 	else
 	{
@@ -130,6 +131,3 @@ bool APhysicsTimelineActor::CanBeGrabbed(UPrimitiveComponent* MeshToGrab) const
 	// Default logic: Can only be grabbed if not currently held by anyone.
 	return InteractedComponent == nullptr;
 }
-
-
-
