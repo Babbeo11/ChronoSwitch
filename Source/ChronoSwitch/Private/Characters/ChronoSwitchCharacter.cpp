@@ -161,6 +161,7 @@ void AChronoSwitchCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
 	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedMeshOriginalCollision);
 	DOREPLIFETIME(AChronoSwitchCharacter, GrabbedRelativeRotation);
 	DOREPLIFETIME(AChronoSwitchCharacter, bIsPlayer1);
+	DOREPLIFETIME(AChronoSwitchCharacter, Endgame);
 }
 
 void AChronoSwitchCharacter::OnRep_IsPlayer1()
@@ -992,9 +993,12 @@ void AChronoSwitchCharacter::Client_ForcedTimelineChange_Implementation(uint8 Ne
 	}
 }
 
+
 bool AChronoSwitchCharacter::CheckTimelineOverlap()
 {
 	if (!GetCapsuleComponent()) return false;
+	
+	if (Endgame) return false;
 	
 	const AChronoSwitchPlayerState* PS = GetPlayerState<AChronoSwitchPlayerState>();
 	if (!PS) return false;

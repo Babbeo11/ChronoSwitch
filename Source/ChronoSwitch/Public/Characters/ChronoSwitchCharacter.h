@@ -40,6 +40,9 @@ public:
 	/** Client RPC: Forces a timeline change and flushes prediction to prevent rubber banding. */
 	UFUNCTION(Client, Reliable)
 	void Client_ForcedTimelineChange(uint8 NewTimelineID);
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,Replicated, Category = "Timeline")
+	bool Endgame;
 #pragma endregion
 	
 #pragma region UI
