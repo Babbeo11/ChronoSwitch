@@ -4,9 +4,11 @@
 
 #include "OnlineSessionSettings.h"
 #include "OnlineSubsystemUtils.h"
+#include "OnlineSubsystemNames.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "Interfaces/OnlineExternalUIInterface.h"
+#include "Interfaces/OnlineIdentityInterface.h"
 
 #ifndef SEARCH_PRESENCE
 #define SEARCH_PRESENCE FName(TEXT("PRESENCESEARCH"))
@@ -41,10 +43,20 @@ void USessionSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	InviteReceivedDelegateHandle = SessionInterface->AddOnSessionInviteReceivedDelegate_Handle(
 		FOnSessionInviteReceivedDelegate::CreateUObject(this, &USessionSubsystem::OnInviteReceived));
+
+	LoginIfNeeded();
 }
 
 void USessionSubsystem::Deinitialize()
 {
+	if (IOnlineSubsystem* Subsystem = Online::GetSubsystem(GetWorld()); Subsystem && LoginCompleteDelegateHandle.IsValid())
+	{
+		if (IOnlineIdentityPtr Identity = Subsystem->GetIdentityInterface(); Identity.IsValid())
+		{
+			Identity->ClearOnLoginCompleteDelegate_Handle(0, LoginCompleteDelegateHandle);
+		}
+	}
+
 	if (IOnlineSessionPtr SessionInterface = GetSessionInterface(); SessionInterface.IsValid())
 	{
 		SessionInterface->ClearOnSessionUserInviteAcceptedDelegate_Handle(InviteAcceptedDelegateHandle);
@@ -69,6 +81,87 @@ IOnlineSessionPtr USessionSubsystem::GetSessionInterface() const
 	}
 
 	return nullptr;
+}
+
+bool USessionSubsystem::IsUsingEOS() const
+{
+	const IOnlineSubsystem* Subsystem = Online::GetSubsystem(GetWorld());
+	return Subsystem && Subsystem->GetSubsystemName() == EOS_SUBSYSTEM;
+}
+
+bool USessionSubsystem::IsOnlineServiceReady() const
+{
+	IOnlineSubsystem* Subsystem = Online::GetSubsystem(GetWorld());
+	if (!Subsystem)
+	{
+		return false;
+	}
+
+	// Steam and Null authenticate implicitly; only EOS needs an explicit login first
+	if (Subsystem->GetSubsystemName() != EOS_SUBSYSTEM)
+	{
+		return true;
+	}
+
+	const IOnlineIdentityPtr Identity = Subsystem->GetIdentityInterface();
+	return Identity.IsValid() && Identity->GetLoginStatus(0) == ELoginStatus::LoggedIn;
+}
+
+bool USessionSubsystem::IsExternalInviteAvailable() const
+{
+	const IOnlineSubsystem* Subsystem = Online::GetSubsystem(GetWorld());
+	return Subsystem && Subsystem->GetSubsystemName() == STEAM_SUBSYSTEM;
+}
+
+void USessionSubsystem::LoginIfNeeded()
+{
+	if (!IsUsingEOS() || IsOnlineServiceReady() || bLoginInProgress)
+	{
+		return;
+	}
+
+	IOnlineIdentityPtr Identity = Online::GetSubsystem(GetWorld())->GetIdentityInterface();
+	if (!Identity.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("EOS login failed: Identity interface is invalid"));
+		return;
+	}
+
+	// Catch unconfigured credentials early with a clear message instead of opaque EOS SDK errors
+	TArray<FString> Artifacts;
+	GConfig->GetArray(TEXT("/Script/OnlineSubsystemEOS.EOSSettings"), TEXT("Artifacts"), Artifacts, GEngineIni);
+	for (const FString& Artifact : Artifacts)
+	{
+		if (Artifact.Contains(TEXT("PLACEHOLDER")))
+		{
+			UE_LOG(LogTemp, Error, TEXT("EOS credentials in DefaultEngine.ini are still placeholders. Fill in the Epic Dev Portal values under [/Script/OnlineSubsystemEOS.EOSSettings] before running with -CustomConfig=EOS"));
+			OnLoginFinishedSignal.Broadcast(false, TEXT("EOS credentials are not configured"));
+			return;
+		}
+	}
+
+	if (!LoginCompleteDelegateHandle.IsValid())
+	{
+		LoginCompleteDelegateHandle = Identity->AddOnLoginCompleteDelegate_Handle(0,
+			FOnLoginCompleteDelegate::CreateUObject(this, &USessionSubsystem::OnLoginComplete));
+	}
+
+	// Anonymous per-device account; Id carries the display name other players see as host name.
+	// EOS caps Device ID display names at 32 characters.
+	FOnlineAccountCredentials Credentials;
+	Credentials.Type = TEXT("externalauth:DeviceIdAccessToken");
+	Credentials.Id = FString(FPlatformProcess::ComputerName()).Left(32);
+
+	UE_LOG(LogTemp, Log, TEXT("Starting EOS Device ID login as '%s'"), *Credentials.Id);
+	bLoginInProgress = true;
+	Identity->Login(0, Credentials);
+}
+
+void USessionSubsystem::OnLoginComplete(int32 LocalUserNum, bool bWasSuccessful, const FUniqueNetId& UserId, const FString& Error)
+{
+	bLoginInProgress = false;
+	UE_LOG(LogTemp, Log, TEXT("EOS login complete: success=%s %s"), bWasSuccessful ? TEXT("true") : TEXT("false"), *Error);
+	OnLoginFinishedSignal.Broadcast(bWasSuccessful, Error);
 }
 
 
@@ -105,6 +198,13 @@ void USessionSubsystem::CreateSessionWithSettings(const FSessionCreateSettings& 
 		return;
 	}
 
+	if (!IsOnlineServiceReady())
+	{
+		LoginIfNeeded(); // retry the startup login in case it failed
+		OnCreateSessionFinishedSignal.Broadcast(false, TEXT("Online login not completed yet, try again in a moment"));
+		return;
+	}
+
 	LastSessionCreateSettings = SessionCreateSettings;
 
 	if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
@@ -138,9 +238,17 @@ void USessionSubsystem::CreateSessionWithSettings(const FSessionCreateSettings& 
 	OnlineSessionSettings.bShouldAdvertise = SessionCreateSettings.bShouldAdvertise;
 	OnlineSessionSettings.bUsesPresence = SessionCreateSettings.bUsesPresence;
 	OnlineSessionSettings.bUseLobbiesIfAvailable = SessionCreateSettings.bUseLobbiesIfAvailable;
-	OnlineSessionSettings.BuildUniqueId = (SessionCreateSettings.BuildUniqueId != 0) 
-		? SessionCreateSettings.BuildUniqueId 
+	OnlineSessionSettings.BuildUniqueId = (SessionCreateSettings.BuildUniqueId != 0)
+		? SessionCreateSettings.BuildUniqueId
 		: GetBuildUniqueId();
+
+	if (IsUsingEOS())
+	{
+		// Presence requires Epic accounts (EAS); with anonymous Device ID login it must stay off.
+		// Lobbies still work without presence.
+		OnlineSessionSettings.bUsesPresence = false;
+		OnlineSessionSettings.bAllowJoinViaPresence = false;
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("=== HOSTING SESSION INFO ==="));
 	UE_LOG(LogTemp, Warning, TEXT("Name: %s | Project: %s"), *SessionCreateSettings.SessionName, *SESSION_SETTING_PROJECT_NAME.ToString());
@@ -176,10 +284,22 @@ void USessionSubsystem::FindSession(int32 MaxSearchResults, bool bIsLAN)
 		return;
 	}
 
+	if (!IsOnlineServiceReady())
+	{
+		LoginIfNeeded(); // retry the startup login in case it failed
+		OnFindSessionsFinishedSignal.Broadcast(false, 0);
+		return;
+	}
+
 	SessionSearch = MakeShared<FOnlineSessionSearch>();
 	SessionSearch->bIsLanQuery = bIsLAN;
 	SessionSearch->MaxSearchResults = MaxSearchResults;
-	SessionSearch->QuerySettings.Set(SEARCH_PRESENCE, true, EOnlineComparisonOp::Equals);
+	if (!IsUsingEOS())
+	{
+		// Steam-only flag: on EOS it would be treated as a lobby attribute filter
+		// that no host advertises, returning zero results
+		SessionSearch->QuerySettings.Set(SEARCH_PRESENCE, true, EOnlineComparisonOp::Equals);
+	}
 	if (!bIsLAN)
 	{
 		SessionSearch->QuerySettings.Set(SEARCH_LOBBIES, true, EOnlineComparisonOp::Equals);

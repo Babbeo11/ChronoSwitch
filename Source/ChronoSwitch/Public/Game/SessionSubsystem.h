@@ -14,6 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindSessionsFinishedSignal, bool
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnJoinSessionFinishedSignal, bool, bWasSuccessful, FString, ConnectStringOrErrorMessage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnDestroySessionFinishedSignal, bool, bWasSuccessful, FString, ErrorMessage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLeaveSessionFinishedSignal, bool, bWasSuccessful, FString, ErrorMessage);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLoginFinishedSignal, bool, bWasSuccessful, FString, ErrorMessage);
 
 #define SESSION_SETTING_PROJECT_NAME FName(TEXT("CHRONO:SWITCH"))
 #define SESSION_SETTING_SERVER_NAME FName(TEXT("SERVER_NAME"))
@@ -129,6 +130,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Session")
 	void OpenExternalInviteDialog();
 
+	/** True when session calls can be made. Always true on Steam/LAN; on EOS, true once the automatic Device ID login has completed. */
+	UFUNCTION(BlueprintPure, Category = "Session")
+	bool IsOnlineServiceReady() const;
+
+	/** True when the platform has an invite overlay (Steam). Bind the invite button's visibility to this. */
+	UFUNCTION(BlueprintPure, Category = "Session")
+	bool IsExternalInviteAvailable() const;
+
 	void CreateSession(int32 NumPublicConnections, bool bIsLAN);
 	void CreateSessionWithSettings(const FSessionCreateSettings& SessionCreateSettings);
 	void FindSession(int32 MaxSearchResults, bool bIsLAN);
@@ -152,7 +161,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Session|Events")
 	FOnLeaveSessionFinishedSignal OnLeaveSessionFinishedSignal;
 
+	/** Broadcast when the EOS Device ID login finishes. Never fires on Steam (no explicit login needed). */
+	UPROPERTY(BlueprintAssignable, Category = "Session|Events")
+	FOnLoginFinishedSignal OnLoginFinishedSignal;
+
 private:
+	void LoginIfNeeded();
+	void OnLoginComplete(int32 LocalUserNum, bool bWasSuccessful, const FUniqueNetId& UserId, const FString& Error);
+	bool IsUsingEOS() const;
 	IOnlineSessionPtr GetSessionInterface() const;
 
 	FSessionSearchResultInfo MakeSessionInfoFromSearchResult(const FOnlineSessionSearchResult& SearchResult, int32 SessionIndex) const;
@@ -176,6 +192,9 @@ private:
 
 	int32 PendingInviteLocalUserNum;
 	FOnlineSessionSearchResult PendingInviteResult;
+
+	bool bLoginInProgress = false;
+	FDelegateHandle LoginCompleteDelegateHandle;
 
 	FDelegateHandle DestroySessionCompleteDelegateHandle;
 	FDelegateHandle CreateSessionCompleteDelegateHandle;
