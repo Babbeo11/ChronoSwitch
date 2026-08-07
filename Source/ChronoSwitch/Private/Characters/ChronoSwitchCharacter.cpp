@@ -107,7 +107,7 @@ void AChronoSwitchCharacter::BeginPlay()
 	}
 	
 	// UI is not managed by Server
-	if (IsLocallyControlled() && PlayerVisorWidgetClass)
+	if (IsLocallyControlled() && PlayerVisorWidgetClass && bShouldHaveWidget)
 	{
 		// Create Widget from blueprint class
 		PlayerVisorWidget = CreateWidget<UPlayerVisorWidget>(GetWorld(), PlayerVisorWidgetClass);

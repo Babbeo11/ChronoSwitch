@@ -111,7 +111,10 @@ protected:
 #pragma endregion
 
 #pragma region UI
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "UI")
+	bool bShouldHaveWidget = true;
+	
+	UPROPERTY(BlueprintReadWrite, Category = "UI")
 	UPlayerVisorWidget* PlayerVisorWidget;
 	
 	UFUNCTION()
